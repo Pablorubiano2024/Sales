@@ -50,6 +50,12 @@ class Settings(BaseSettings):
     # Not yet integrated for real — see backend/app/integrations/dropi.py.
     dropi_integration_key: str | None = None
 
+    # --- CJdropshipping (supplier) ---
+    # Real, verified self-serve API (developers.cjdropshipping.com). Create an
+    # account there, generate an API Key from your account, and set both.
+    cj_email: str | None = None
+    cj_api_key: str | None = None
+
     # --- Arbitrage thresholds (defaults; configurable, never hard-coded inline) ---
     min_roi: Decimal = Decimal("0.30")
     min_net_profit: Decimal = Decimal("20000")

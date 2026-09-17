@@ -86,9 +86,11 @@ supplier → supplier ships directly to customer → profit tracked.
   real error handling) against the public DummyJSON demo product API. Proves out the integration
   pattern; it is still NOT a real Colombian supplier (fictional USD prices) — see its docstring.
 - `backend/app/integrations/dropi.py` — skeleton `SourceAdapter` for Dropi, same pattern as
-  `mercadolibre.py` (every method raises `NotImplementedError` with a TODO). As of 2026-09-17 the
-  user has no Dropi account yet — do not implement real endpoints until one exists and Dropi's
-  own docs have been obtained (see VERIFIED FINDINGS below).
+  `mercadolibre.py` (every method raises `NotImplementedError` with a TODO). Blocked — see
+  VERIFIED FINDINGS below before touching this.
+- `backend/app/integrations/cjdropshipping.py` — a REAL, working `SourceAdapter` against
+  CJdropshipping's documented API (login, product search, product detail all confirmed live).
+  This is the project's actual functioning supplier integration right now.
 - `backend/app/core/security.py` — the `API_AUTH_TOKEN` / `X-API-Key` check applied to all
   `/api/*` routers. A single shared secret, not a user system; replace it if a phase needs
   per-user auth.
@@ -102,14 +104,30 @@ supplier → supplier ships directly to customer → profit tracked.
   usable without auth — returned `403 forbidden` when tested live (2026-09-17), with and without
   a browser-like User-Agent. Do not build against it as a no-auth endpoint; assume OAuth/App
   credentials are required for this API now, same as everything else in `mercadolibre.py`.
-- **Dropi** (dropi.co) is Colombia's dominant dropshipping platform and matches this project's
-  business model closely (verified suppliers, pay-on-delivery, ship-direct-to-customer). It has
-  an integration API (`dropi-integration-key` header, per third-party-hosted docs found during
-  research) but it is not self-serve/public — it requires an active Dropi account and a key
-  generated from their panel. Treat as the most likely first real supplier integration once the
-  user has that account; do not implement against unverified third-party doc mirrors — get the
-  key and official docs from Dropi directly first. As of 2026-09-17 the user has not registered
-  yet — ask before assuming an account exists.
+- **Dropi has a real API at `api.dropi.co`, but it's likely gated to white-label partners.**
+  `https://api.dropi.co/docs` serves a genuine, officially-hosted OpenAPI 3.0 spec (contact:
+  soporteti@dropi.co) — confirmed live 2026-09-17. It documents only 8 endpoints (auth, register,
+  categories, users, warehouses, cancellation reasons) — none for product catalog/pricing/orders.
+  Live probing confirmed `POST /api/products` and `POST /integrations/products` exist (401, not
+  404) but their schema isn't in the public spec. The user registered a normal (non-white-label)
+  dropshipper account and tried `POST /integrations/login` with `white_brand_id` empty — it
+  returned `{"message": "Attempt to read property \"id\" on null", "status": 400}`, a server-side
+  null-pointer error from looking up a white-label brand by that (empty) ID. This strongly
+  suggests `/integrations/*` requires a `white_brand_id` that only white-label reseller partners
+  have, not regular individual dropshippers. Status: waiting on a reply from Dropi support
+  (soporteti@dropi.co) asking whether individual dropshippers get API access at all. Do not
+  attempt this login flow again with real credentials from chat — if credentials are needed for
+  further diagnosis, have the user run a local script themselves (see git history:
+  `scripts/dropi_explore.py`) and paste back only the printed output, never the password.
+  IMPORTANT: the user's real Dropi password was pasted into chat once during this — they were
+  told to change it immediately; if you see a plaintext password in future output, flag it the
+  same way and never write it to any file.
+- **CJdropshipping is the real, working alternative — already integrated.** Self-serve API,
+  officially documented at developers.cjdropshipping.com, account + API key created directly by
+  the user, no partner approval needed. See `cjdropshipping.py`. Trade-off: it's a China-based
+  global supplier, not a Colombian one, so shipping times to Colombia are longer than Dropi's
+  promised 24-72h — keep Dropi as the long-term goal if support unblocks it, but CJ is what
+  actually works today.
 
 ## DEPLOYED STATE (as of 2026-09-17)
 
