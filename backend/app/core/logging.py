@@ -28,6 +28,7 @@ def configure_logging() -> None:
 
     # Quiet down noisy third-party loggers by default.
     logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
     logging.getLogger("uvicorn.access").setLevel(logging.INFO)
 
     _CONFIGURED = True

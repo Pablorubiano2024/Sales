@@ -33,6 +33,12 @@ class Settings(BaseSettings):
     api_host: str = "127.0.0.1"
     api_port: int = 8000
 
+    # --- Auth ---
+    # When unset, all /api/* endpoints are open (fine for local-only use).
+    # Set it to require an `X-API-Key` header matching this value — do this
+    # before deploying anywhere reachable beyond localhost.
+    api_auth_token: str | None = None
+
     # --- Database ---
     database_url: str = "sqlite:///./data/arbitrage.db"
 

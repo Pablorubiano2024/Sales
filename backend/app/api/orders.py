@@ -6,10 +6,11 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from backend.app.core.database import get_db
+from backend.app.core.security import require_api_key
 from backend.app.models.order import Order, OrderStatus
 from backend.app.schemas.order import OrderRead
 
-router = APIRouter(prefix="/api/orders", tags=["orders"])
+router = APIRouter(prefix="/api/orders", tags=["orders"], dependencies=[Depends(require_api_key)])
 
 
 @router.get("", response_model=list[OrderRead])

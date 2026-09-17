@@ -4,12 +4,15 @@ logic. Never exposes secrets such as the Anthropic API key."""
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from backend.app.core.config import get_settings
+from backend.app.core.security import require_api_key
 
-router = APIRouter(prefix="/api/settings", tags=["settings"])
+router = APIRouter(
+    prefix="/api/settings", tags=["settings"], dependencies=[Depends(require_api_key)]
+)
 
 
 class SettingsRead(BaseModel):

@@ -10,8 +10,15 @@ import os
 from typing import Any
 
 import httpx
+from dotenv import load_dotenv
+
+# Streamlit doesn't load .env on its own (unlike the backend, via
+# pydantic-settings) — load it here so BACKEND_API_URL / API_AUTH_TOKEN
+# behave the same way for both processes.
+load_dotenv()
 
 API_BASE_URL = os.environ.get("BACKEND_API_URL", "http://127.0.0.1:8000")
+API_AUTH_TOKEN = os.environ.get("API_AUTH_TOKEN")
 
 
 class ApiError(RuntimeError):
@@ -20,8 +27,11 @@ class ApiError(RuntimeError):
 
 def _request(method: str, path: str, **kwargs: Any) -> Any:
     url = f"{API_BASE_URL}{path}"
+    headers = kwargs.pop("headers", None) or {}
+    if API_AUTH_TOKEN:
+        headers["X-API-Key"] = API_AUTH_TOKEN
     try:
-        response = httpx.request(method, url, timeout=10.0, **kwargs)
+        response = httpx.request(method, url, timeout=10.0, headers=headers, **kwargs)
         response.raise_for_status()
         return response.json()
     except httpx.HTTPStatusError as exc:

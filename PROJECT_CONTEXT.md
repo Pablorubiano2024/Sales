@@ -74,10 +74,31 @@ supplier → supplier ships directly to customer → profit tracked.
   persisted `Opportunity`.
 - `backend/app/integrations/base.py` — the adapter interfaces every source/marketplace
   integration must implement.
-- `backend/app/integrations/mock_source.py` — fake supplier used for dev/tests; do not treat as
-  a real integration.
+- `backend/app/integrations/mock_source.py` — fake, in-memory supplier used for dev/tests; do not
+  treat as a real integration.
+- `backend/app/integrations/dummyjson_source.py` — a real HTTP `SourceAdapter` (real requests,
+  real error handling) against the public DummyJSON demo product API. Proves out the integration
+  pattern; it is still NOT a real Colombian supplier (fictional USD prices) — see its docstring.
+- `backend/app/core/security.py` — the `API_AUTH_TOKEN` / `X-API-Key` check applied to all
+  `/api/*` routers. A single shared secret, not a user system; replace it if a phase needs
+  per-user auth.
 - `backend/app/jobs/` — discovery/price-monitor pipelines, callable today, intended to be
   scheduler-triggered later (Phase 2+).
+
+## VERIFIED FINDINGS (so future agents don't re-research these)
+
+- **MercadoLibre's public search endpoint is no longer open.** `GET
+  https://api.mercadolibre.com/sites/{site_id}/search` — often cited in older tutorials as
+  usable without auth — returned `403 forbidden` when tested live (2026-09-17), with and without
+  a browser-like User-Agent. Do not build against it as a no-auth endpoint; assume OAuth/App
+  credentials are required for this API now, same as everything else in `mercadolibre.py`.
+- **Dropi** (dropi.co) is Colombia's dominant dropshipping platform and matches this project's
+  business model closely (verified suppliers, pay-on-delivery, ship-direct-to-customer). It has
+  an integration API (`dropi-integration-key` header, per third-party-hosted docs found during
+  research) but it is not self-serve/public — it requires an active Dropi account and a key
+  generated from their panel. Treat as the most likely first real supplier integration once the
+  user has that account; do not implement against unverified third-party doc mirrors — get the
+  key and official docs from Dropi directly first.
 
 ## FUTURE ROADMAP
 

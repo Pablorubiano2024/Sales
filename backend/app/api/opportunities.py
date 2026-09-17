@@ -6,12 +6,15 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from backend.app.core.database import get_db
+from backend.app.core.security import require_api_key
 from backend.app.models.opportunity import Opportunity, OpportunityStatus
 from backend.app.schemas.opportunity import OpportunityAnalyzeRequest, OpportunityRead
 from backend.app.services.ai_service import enrich_opportunity_with_ai
 from backend.app.services.arbitrage_engine import evaluate_opportunity
 
-router = APIRouter(prefix="/api/opportunities", tags=["opportunities"])
+router = APIRouter(
+    prefix="/api/opportunities", tags=["opportunities"], dependencies=[Depends(require_api_key)]
+)
 
 
 @router.get("", response_model=list[OpportunityRead])

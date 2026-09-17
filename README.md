@@ -48,7 +48,8 @@ backend/app/
   schemas/            Pydantic request/response schemas
   services/           business logic: pricing_engine, opportunity_engine, arbitrage_engine,
                        product_matcher, order_service, ai_service
-  integrations/       base adapter interfaces + Claude client + MercadoLibre skeleton + mock source
+  integrations/       base adapter interfaces + Claude client + MercadoLibre skeleton +
+                       mock source + DummyJSON (real HTTP demo source)
   repositories/       thin generic DB-access helper
   jobs/               discovery / price-monitor pipelines (callable now, schedulable later)
 
@@ -100,6 +101,7 @@ cp .env.example .env
 | `APP_ENV` | `development` / `production` | `development` |
 | `DATABASE_URL` | SQLAlchemy URL | `sqlite:///./data/arbitrage.db` |
 | `API_HOST` / `API_PORT` | uvicorn bind address | `127.0.0.1` / `8000` |
+| `API_AUTH_TOKEN` | Shared secret required as `X-API-Key` on `/api/*` (blank = disabled) | empty |
 | `BACKEND_API_URL` | URL the Streamlit app calls | `http://127.0.0.1:8000` |
 | `ANTHROPIC_API_KEY` | Claude API key (optional) | empty |
 | `ANTHROPIC_MODEL` | Claude model id | `claude-sonnet-5` |
@@ -110,6 +112,15 @@ cp .env.example .env
 
 Never commit `.env` (it's git-ignored). `ANTHROPIC_API_KEY` is read only from the environment —
 it is never hard-coded.
+
+### API authentication
+
+`/health` is always open. Every `/api/*` endpoint is protected by `backend/app/core/security.py`:
+if `API_AUTH_TOKEN` is unset, auth is disabled (convenient for local-only use); if it's set,
+requests must include a matching `X-API-Key` header or get a `401`. The Streamlit frontend reads
+the same `.env` and attaches the header automatically (`frontend/api_client.py`). Set this before
+deploying the API anywhere reachable beyond localhost — it's a single shared secret, not a full
+user/auth system, and is meant to be replaced if a later phase needs per-user accounts.
 
 ## Running the backend
 
@@ -143,6 +154,17 @@ with a deliberate spread of outcomes (profitable/unprofitable, different ROIs, d
 levels) so the dashboard has something to show immediately. All data is clearly fictional —
 nothing is scraped.
 
+```bash
+poetry run python scripts/discover_demo.py
+```
+
+Exercises the real discovery pipeline (`jobs/discovery.run_discovery`) against
+`DummyJsonSourceAdapter` — a genuine HTTP integration (real requests, real error handling)
+against the public [DummyJSON](https://dummyjson.com) demo product API. It is **not** a real
+Colombian supplier (prices are fictional and in USD), but it proves out the adapter pattern so a
+real source (e.g. Dropi, once you have an account/integration key) can be dropped in later
+without touching `services/` or `jobs/`.
+
 ## Running tests
 
 ```bash
@@ -167,14 +189,16 @@ poetry run mypy backend
   whose methods raise `NotImplementedError` with TODOs — it does not call any real endpoint.
   Wiring it up requires a registered MercadoLibre application, OAuth credentials, and verified
   endpoint documentation.
-- **No real supplier/source is integrated.** `backend/app/integrations/mock_source.py` is a
-  clearly-fake, in-memory catalog for development and tests.
+- **No real supplier/source is integrated.** `mock_source.py` is a clearly-fake, in-memory
+  catalog for tests; `dummyjson_source.py` makes real HTTP calls but against a public demo API,
+  not an actual Colombian supplier. Wiring up a real one (e.g. Dropi) requires that account's
+  credentials — see `PROJECT_CONTEXT.md`.
 - **No scheduler.** `backend/app/jobs/discovery.py` and `price_monitor.py` are callable
   pipelines, not cron/queue-scheduled jobs yet.
 - **Order detection is manual.** There is no live marketplace webhook/poll creating `Order` rows
   automatically yet; `services/order_service.py` expects to be called once a sale is known.
-- **No authentication.** The API and dashboard are unauthenticated — fine for local/single-user
-  use, not for a public deployment as-is.
+- **Auth is a single shared API key, not a user system.** `API_AUTH_TOKEN` (see above) stops the
+  API from being wide open once deployed, but there's no per-user login, roles, or sessions.
 - Manual opportunity status overrides ("Mark reviewed" / "Approve" / "Reject" buttons) are
   visible as placeholders in the UI but not yet backed by an API endpoint.
 

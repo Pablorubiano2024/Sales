@@ -7,10 +7,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.app.core.database import get_db
+from backend.app.core.security import require_api_key
 from backend.app.models.product import Product
 from backend.app.schemas.product import ProductCreate, ProductRead
 
-router = APIRouter(prefix="/api/products", tags=["products"])
+router = APIRouter(
+    prefix="/api/products", tags=["products"], dependencies=[Depends(require_api_key)]
+)
 
 
 @router.get("", response_model=list[ProductRead])
