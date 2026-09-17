@@ -1,14 +1,15 @@
-"""Reusable table rendering helpers."""
+"""Ayudas reutilizables para renderizar tablas."""
 
 from __future__ import annotations
 
 import pandas as pd
 import streamlit as st
+from i18n import opportunity_status_label, order_status_label, shipping_status_label
 
 
 def render_opportunities_table(opportunities: list[dict], products_by_id: dict[str, dict]) -> None:
     if not opportunities:
-        st.info("No opportunities match the current filters.")
+        st.info("Ninguna oportunidad coincide con los filtros actuales.")
         return
 
     rows = []
@@ -17,15 +18,15 @@ def render_opportunities_table(opportunities: list[dict], products_by_id: dict[s
         rows.append(
             {
                 "id": opp["id"],
-                "Product": product.get("name", opp["product_id"]),
-                "Buy Price": opp["buy_price"],
-                "Sell Price": opp["sell_price"],
-                "Net Profit": opp["net_profit"],
+                "Producto": product.get("name", opp["product_id"]),
+                "Precio compra": opp["buy_price"],
+                "Precio venta": opp["sell_price"],
+                "Ganancia neta": opp["net_profit"],
                 "ROI": opp["roi"],
-                "Margin": opp["margin"],
-                "Risk": opp["risk_score"],
-                "AI Score": opp["ai_score"],
-                "Status": opp["status"],
+                "Margen": opp["margin"],
+                "Riesgo": opp["risk_score"],
+                "Puntaje IA": opp["ai_score"],
+                "Estado": opportunity_status_label(opp["status"]),
             }
         )
 
@@ -34,13 +35,13 @@ def render_opportunities_table(opportunities: list[dict], products_by_id: dict[s
     st.dataframe(
         display_df.style.format(
             {
-                "Buy Price": "${:,.0f}",
-                "Sell Price": "${:,.0f}",
-                "Net Profit": "${:,.0f}",
+                "Precio compra": "${:,.0f}",
+                "Precio venta": "${:,.0f}",
+                "Ganancia neta": "${:,.0f}",
                 "ROI": "{:.1%}",
-                "Margin": "{:.1%}",
-                "Risk": "{:.2f}",
-                "AI Score": "{:.2f}",
+                "Margen": "{:.1%}",
+                "Riesgo": "{:.2f}",
+                "Puntaje IA": "{:.2f}",
             },
             na_rep="—",
         ),
@@ -51,7 +52,7 @@ def render_opportunities_table(opportunities: list[dict], products_by_id: dict[s
 
 def render_orders_table(orders: list[dict], products_by_id: dict[str, dict]) -> None:
     if not orders:
-        st.info("No orders yet.")
+        st.info("Aún no hay órdenes.")
         return
 
     rows = []
@@ -59,13 +60,13 @@ def render_orders_table(orders: list[dict], products_by_id: dict[str, dict]) -> 
         product = products_by_id.get(order["product_id"], {})
         rows.append(
             {
-                "Product": product.get("name", order["product_id"]),
-                "Selling Price": order["selling_price"],
-                "Supplier Price": order["supplier_price"],
-                "Expected Profit": order["expected_profit"],
-                "Status": order["status"],
-                "Shipping": order["customer_shipping_status"],
-                "Created": order["created_at"],
+                "Producto": product.get("name", order["product_id"]),
+                "Precio de venta": order["selling_price"],
+                "Precio proveedor": order["supplier_price"],
+                "Ganancia esperada": order["expected_profit"],
+                "Estado": order_status_label(order["status"]),
+                "Envío": shipping_status_label(order["customer_shipping_status"]),
+                "Creada": order["created_at"],
             }
         )
     df = pd.DataFrame(rows)

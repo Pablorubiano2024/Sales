@@ -1,0 +1,36 @@
+# Render Blueprint: despliega el backend FastAPI (plan gratuito).
+# No usa Docker: Render instala las dependencias con Poetry directamente.
+#
+# Uso: en Render -> New -> Blueprint -> conectar este repo. Las variables
+# marcadas con `sync: false` se piden al crear el Blueprint (no se guardan
+# en este archivo) — ahí van DATABASE_URL (tu connection string de Neon),
+# API_AUTH_TOKEN y, si quieres habilitar el enriquecimiento con IA,
+# ANTHROPIC_API_KEY.
+services:
+  - name: product-arbitrage-api
+    type: web
+    runtime: python
+    plan: free
+    buildCommand: "pip install poetry && poetry config virtualenvs.create false && poetry install --no-root --only main"
+    startCommand: "uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.7"
+      - key: APP_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: API_AUTH_TOKEN
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: ANTHROPIC_MODEL
+        value: claude-sonnet-5
+      - key: MIN_ROI
+        value: "0.30"
+      - key: MIN_NET_PROFIT
+        value: "20000"
+      - key: MAX_RISK_SCORE
+        value: "0.50"
+      - key: DEFAULT_CURRENCY
+        value: COP

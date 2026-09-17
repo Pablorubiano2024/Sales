@@ -55,6 +55,22 @@ class Settings(BaseSettings):
     default_currency: str = "COP"
 
     @property
+    def sqlalchemy_database_url(self) -> str:
+        """`database_url`, normalized for SQLAlchemy.
+
+        Neon (and other Postgres hosts) hand out `postgres://` or
+        `postgresql://` URLs; SQLAlchemy 2.0 needs an explicit driver in the
+        scheme, so both get rewritten to `postgresql+psycopg://` (psycopg 3).
+        SQLite URLs pass through unchanged.
+        """
+        url = self.database_url
+        if url.startswith("postgres://"):
+            return url.replace("postgres://", "postgresql+psycopg://", 1)
+        if url.startswith("postgresql://"):
+            return url.replace("postgresql://", "postgresql+psycopg://", 1)
+        return url
+
+    @property
     def sqlite_path(self) -> Path | None:
         """Filesystem path for the SQLite DB file, if using SQLite."""
         if not self.database_url.startswith("sqlite"):

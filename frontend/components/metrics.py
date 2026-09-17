@@ -1,4 +1,4 @@
-"""Reusable KPI/metric row rendering for the Streamlit dashboard."""
+"""Renderizado reutilizable de la fila de métricas (KPIs) del panel."""
 
 from __future__ import annotations
 
@@ -14,11 +14,11 @@ def render_dashboard_metrics(
     pending_orders: int,
 ) -> None:
     col1, col2, col3 = st.columns(3)
-    col1.metric("Total Products", total_products)
-    col2.metric("Opportunities Found", total_opportunities)
-    col3.metric("Promising Opportunities", promising_opportunities)
+    col1.metric("Productos totales", total_products)
+    col2.metric("Oportunidades encontradas", total_opportunities)
+    col3.metric("Oportunidades prometedoras", promising_opportunities)
 
     col4, col5, col6 = st.columns(3)
-    col4.metric("Potential Profit (COP)", f"${potential_profit:,.0f}")
-    col5.metric("Active Listings", active_listings)
-    col6.metric("Pending Orders", pending_orders)
+    col4.metric("Ganancia potencial (COP)", f"${potential_profit:,.0f}")
+    col5.metric("Publicaciones activas", active_listings)
+    col6.metric("Órdenes pendientes", pending_orders)

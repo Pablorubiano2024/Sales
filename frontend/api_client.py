@@ -36,10 +36,11 @@ def _request(method: str, path: str, **kwargs: Any) -> Any:
         return response.json()
     except httpx.HTTPStatusError as exc:
         detail = exc.response.json().get("detail", str(exc)) if exc.response.content else str(exc)
-        raise ApiError(f"{method} {path} failed: {detail}") from exc
+        raise ApiError(f"{method} {path} falló: {detail}") from exc
     except httpx.ConnectError as exc:
         raise ApiError(
-            f"Could not reach backend at {API_BASE_URL}. Is the FastAPI server running?"
+            f"No se pudo conectar con el backend en {API_BASE_URL}. "
+            "¿Está corriendo el servidor de FastAPI?"
         ) from exc
 
 

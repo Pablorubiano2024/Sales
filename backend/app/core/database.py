@@ -1,8 +1,9 @@
 """SQLAlchemy engine/session setup.
 
-Uses SQLite for the MVP. The engine is built from `DATABASE_URL` so
-switching to PostgreSQL later only requires changing that one setting
-(plus, if needed, adding `psycopg` as a dependency).
+Uses SQLite by default (local/dev). Setting `DATABASE_URL` to a Postgres
+connection string (e.g. from Neon) switches to Postgres — no other code
+changes needed. `sqlalchemy_database_url` (see core/config.py) normalizes
+the scheme so SQLAlchemy picks the psycopg driver explicitly.
 """
 
 from __future__ import annotations
@@ -18,7 +19,14 @@ settings = get_settings()
 
 _connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
 
-engine = create_engine(settings.database_url, connect_args=_connect_args)
+engine = create_engine(
+    settings.sqlalchemy_database_url,
+    connect_args=_connect_args,
+    # Cheap health-check before reusing a pooled connection — hosted
+    # Postgres (Neon's free tier suspends idle compute) can otherwise hand
+    # back a stale/closed connection after a period of inactivity.
+    pool_pre_ping=True,
+)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 

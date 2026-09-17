@@ -18,8 +18,14 @@ creation and order-driven supplier purchasing.
 ## CURRENT ARCHITECTURE
 
 FastAPI (backend API + business logic) + Streamlit (presentation-only dashboard) + SQLAlchemy +
-SQLite (Postgres-ready via `DATABASE_URL`) + Anthropic Claude (optional enrichment). See
-`README.md` for the full folder structure and setup instructions.
+SQLite locally / Postgres in production via `DATABASE_URL` (Neon) + Anthropic Claude (optional
+enrichment). See `README.md` for the full folder structure, setup, and the Deployment section
+(Neon + Render + Streamlit Community Cloud, three separately-hosted pieces, no Docker).
+
+**Language split:** code, comments, commit messages and this doc are in English. The Streamlit
+UI text (`frontend/`) is in Spanish, per the user's request — keep new frontend strings in
+Spanish and route API enum values through `frontend/i18n.py` rather than translating the API
+contract itself.
 
 ## BUSINESS MODEL
 

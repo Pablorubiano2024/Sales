@@ -54,15 +54,22 @@ backend/app/
   jobs/               discovery / price-monitor pipelines (callable now, schedulable later)
 
 frontend/
-  app.py              Streamlit dashboard entrypoint
+  app.py              Streamlit dashboard entrypoint (UI text is in Spanish — see note below)
   api_client.py        HTTP client calling the FastAPI backend
-  pages/               Opportunities, Products, Orders, Marketplaces, Settings
+  auth_gate.py          optional APP_PASSWORD gate for public deployments
+  i18n.py               English (API) -> Spanish (UI) status label mapping
+  pages/               Oportunidades, Productos, Órdenes, Marketplaces, Configuración
   components/           metrics, tables, opportunity detail card
 
 tests/                pytest suite (pricing, classification, API, health)
 scripts/seed.py       loads fictional demo data
 alembic/               DB migrations (SQLite now, Postgres-ready)
 ```
+
+**The Streamlit UI is in Spanish** (labels, buttons, messages); the backend, code, comments and
+this documentation stay in English. `frontend/i18n.py` maps the API's English enum values
+(`approved`, `rejected`, ...) to Spanish display labels — those enum values are the API contract
+and are not translated.
 
 **Financial math is deterministic and AI-free.** `services/pricing_engine.py` and
 `services/opportunity_engine.py` compute gross/net profit, ROI, margin and status
@@ -76,7 +83,9 @@ Anthropic API key configured.
 - **Backend:** Python 3.12+, FastAPI, Pydantic v2, SQLAlchemy 2.0, Alembic, httpx, uvicorn
 - **Frontend:** Streamlit
 - **AI:** Anthropic Claude API (`anthropic` SDK), structured/Pydantic-validated output
-- **Database:** SQLite for the MVP (swap `DATABASE_URL` for PostgreSQL later — no code changes needed)
+- **Database:** SQLite by default (local/dev); set `DATABASE_URL` to a Postgres connection string
+  (e.g. from [Neon](https://neon.tech)) to switch — no code changes needed, same pattern as this
+  author's other project (Jobs): unset = SQLite, set = Postgres
 - **Config:** pydantic-settings + `.env`
 - **Testing:** pytest
 - **Lint/format:** Ruff; `mypy` where useful
@@ -99,10 +108,11 @@ cp .env.example .env
 | Variable | Purpose | Default |
 |---|---|---|
 | `APP_ENV` | `development` / `production` | `development` |
-| `DATABASE_URL` | SQLAlchemy URL | `sqlite:///./data/arbitrage.db` |
+| `DATABASE_URL` | SQLite path, or a Postgres URL (Neon) — blank/sqlite = local file | `sqlite:///./data/arbitrage.db` |
 | `API_HOST` / `API_PORT` | uvicorn bind address | `127.0.0.1` / `8000` |
 | `API_AUTH_TOKEN` | Shared secret required as `X-API-Key` on `/api/*` (blank = disabled) | empty |
 | `BACKEND_API_URL` | URL the Streamlit app calls | `http://127.0.0.1:8000` |
+| `APP_PASSWORD` | Shared password gate for the Streamlit UI (blank = disabled) | empty |
 | `ANTHROPIC_API_KEY` | Claude API key (optional) | empty |
 | `ANTHROPIC_MODEL` | Claude model id | `claude-sonnet-5` |
 | `MIN_ROI` | Opportunity engine threshold | `0.30` |
@@ -174,6 +184,45 @@ poetry run pytest
 Covers: gross/net profit, ROI, margin (including zero-cost/zero-price edge cases), opportunity
 classification (rejected/review/promising/approved), the arbitrage engine's DB persistence,
 product CRUD, and the health endpoint. No test requires network access or a real Anthropic key.
+
+## Deployment
+
+Three pieces, each hosted separately (no Docker, all free-tier friendly):
+
+1. **Database — [Neon](https://neon.tech) (Postgres)**
+   Create a project, copy its connection string (`postgresql://user:password@host/db?sslmode=require`).
+   That's the only thing you need from Neon — SQLAlchemy handles the rest via `DATABASE_URL`.
+
+2. **Backend — [Render](https://render.com)**, via the included `render.yaml` blueprint:
+   - Render dashboard → **New → Blueprint** → connect this GitHub repo.
+   - When prompted for the `sync: false` variables, set:
+     - `DATABASE_URL` → the Neon connection string from step 1
+     - `API_AUTH_TOKEN` → a secret you make up (required — see API authentication above)
+     - `ANTHROPIC_API_KEY` → optional, only if you want AI enrichment live
+   - Render builds with Poetry (`poetry install --no-root --only main`) and runs
+     `uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT` — no Dockerfile involved.
+   - Once deployed, note the public URL (e.g. `https://product-arbitrage-api.onrender.com`) and
+     confirm `<url>/health` returns `{"status": "ok"}`.
+   - Run migrations / seed against the live database once, from your machine:
+     `DATABASE_URL='<neon url>' poetry run alembic upgrade head` (or `init_db()` runs this
+     automatically on the deployed app's own startup, same as locally).
+
+3. **Frontend — [Streamlit Community Cloud](https://share.streamlit.io)**
+   - Sign in with GitHub, **New app**, pick this repo/branch, main file path: `frontend/app.py`.
+   - Streamlit Cloud installs the root `requirements.txt` (frontend-only deps — see that file).
+   - In the app's **Settings → Secrets**, add:
+     ```toml
+     BACKEND_API_URL = "https://product-arbitrage-api.onrender.com"
+     API_AUTH_TOKEN = "the same value you set in Render"
+     APP_PASSWORD = "a password to gate the public dashboard (optional but recommended)"
+     ```
+   - Deploy. `frontend/auth_gate.py` will prompt for `APP_PASSWORD` before showing any page if
+     it's set; leave it unset for an open dashboard.
+
+Render's free web services spin down after inactivity and take a few seconds to wake up on the
+next request — expect a slow first load after idle periods; this is a free-tier tradeoff, not a
+bug. Neon's free tier similarly suspends compute when idle (`pool_pre_ping=True` on the backend's
+engine handles the resulting stale-connection case gracefully).
 
 ## Lint / format
 

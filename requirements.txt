@@ -1,0 +1,10 @@
+# Dependencias SOLO del frontend, para Streamlit Community Cloud.
+#
+# El backend usa Poetry (pyproject.toml) y se despliega aparte (ver
+# render.yaml). Streamlit Cloud instala este archivo por defecto desde la
+# raíz del repo, así que se mantiene liviano — no incluye FastAPI,
+# SQLAlchemy, Alembic ni el SDK de Anthropic, que el frontend no necesita.
+streamlit>=1.64.0,<2.0.0
+httpx>=0.28.1,<1.0.0
+pandas>=2.3.0,<3.0.0
+python-dotenv>=1.0.1,<2.0.0
