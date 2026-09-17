@@ -1,0 +1,57 @@
+[tool.poetry]
+package-mode = false
+
+[project]
+name = "product-arbitrage-platform"
+version = "0.1.0"
+description = "Automated product arbitrage / dropshipping platform (Colombia / MercadoLibre focus)"
+authors = [
+    {name = "Pablo Rubiano"}
+]
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi (>=0.115.0,<1.0.0)",
+    "uvicorn[standard] (>=0.32.0,<1.0.0)",
+    "pydantic (>=2.9.0,<3.0.0)",
+    "pydantic-settings (>=2.6.0,<3.0.0)",
+    "sqlalchemy (>=2.0.35,<3.0.0)",
+    "alembic (>=1.13.3,<2.0.0)",
+    "httpx (>=0.27.0,<1.0.0)",
+    "anthropic (>=0.40.0,<1.0.0)",
+    "streamlit (>=1.39.0,<2.0.0)",
+    "pandas (>=2.2.0,<3.0.0)",
+    "python-dotenv (>=1.0.1,<2.0.0)",
+]
+
+[tool.poetry.group.dev.dependencies]
+pytest = ">=8.3.0,<9.0.0"
+ruff = ">=0.7.0,<1.0.0"
+mypy = ">=1.13.0,<2.0.0"
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = [
+    "B008",  # FastAPI's Depends()-as-default is the documented idiom
+    "UP042", # str+Enum is intentional for JSON-serializable API/ORM enums
+    "UP046", # keep Generic[T] for broader tooling compatibility over PEP 695 syntax
+]
+
+[tool.mypy]
+python_version = "3.12"
+plugins = ["pydantic.mypy"]
+ignore_missing_imports = true
+warn_unused_ignores = true
+check_untyped_defs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
