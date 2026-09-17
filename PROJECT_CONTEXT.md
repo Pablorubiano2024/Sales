@@ -85,6 +85,10 @@ supplier → supplier ships directly to customer → profit tracked.
 - `backend/app/integrations/dummyjson_source.py` — a real HTTP `SourceAdapter` (real requests,
   real error handling) against the public DummyJSON demo product API. Proves out the integration
   pattern; it is still NOT a real Colombian supplier (fictional USD prices) — see its docstring.
+- `backend/app/integrations/dropi.py` — skeleton `SourceAdapter` for Dropi, same pattern as
+  `mercadolibre.py` (every method raises `NotImplementedError` with a TODO). As of 2026-09-17 the
+  user has no Dropi account yet — do not implement real endpoints until one exists and Dropi's
+  own docs have been obtained (see VERIFIED FINDINGS below).
 - `backend/app/core/security.py` — the `API_AUTH_TOKEN` / `X-API-Key` check applied to all
   `/api/*` routers. A single shared secret, not a user system; replace it if a phase needs
   per-user auth.
@@ -104,7 +108,18 @@ supplier → supplier ships directly to customer → profit tracked.
   research) but it is not self-serve/public — it requires an active Dropi account and a key
   generated from their panel. Treat as the most likely first real supplier integration once the
   user has that account; do not implement against unverified third-party doc mirrors — get the
-  key and official docs from Dropi directly first.
+  key and official docs from Dropi directly first. As of 2026-09-17 the user has not registered
+  yet — ask before assuming an account exists.
+
+## DEPLOYED STATE (as of 2026-09-17)
+
+The app is live: Neon Postgres (a project separate from this user's other "Jobs" app — do not
+reuse that one's database), FastAPI backend on Render (`render.yaml` blueprint), Streamlit
+frontend on Streamlit Community Cloud. The Streamlit app is deployed as **public** (not
+Streamlit's "private" flag) because the free tier only allows one private app per workspace and
+that slot is already used by the user's Jobs project — access is instead restricted by the
+`APP_PASSWORD` gate (`frontend/auth_gate.py`), same pattern as Jobs. Render's free tier suspends
+the service after idle time (cold start on first request); this is expected, not a bug.
 
 ## FUTURE ROADMAP
 

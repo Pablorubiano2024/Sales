@@ -49,7 +49,7 @@ backend/app/
   services/           business logic: pricing_engine, opportunity_engine, arbitrage_engine,
                        product_matcher, order_service, ai_service
   integrations/       base adapter interfaces + Claude client + MercadoLibre skeleton +
-                       mock source + DummyJSON (real HTTP demo source)
+                       Dropi skeleton + mock source + DummyJSON (real HTTP demo source)
   repositories/       thin generic DB-access helper
   jobs/               discovery / price-monitor pipelines (callable now, schedulable later)
 
@@ -240,8 +240,10 @@ poetry run mypy backend
   endpoint documentation.
 - **No real supplier/source is integrated.** `mock_source.py` is a clearly-fake, in-memory
   catalog for tests; `dummyjson_source.py` makes real HTTP calls but against a public demo API,
-  not an actual Colombian supplier. Wiring up a real one (e.g. Dropi) requires that account's
-  credentials — see `PROJECT_CONTEXT.md`.
+  not an actual Colombian supplier. `dropi.py` is a skeleton like `mercadolibre.py` — Dropi
+  (dropi.co) matches this project's business model closely, but wiring it up for real requires
+  a Dropi account, a generated `dropi-integration-key`, and Dropi's own API documentation (see
+  `PROJECT_CONTEXT.md`) — none of which exist yet.
 - **No scheduler.** `backend/app/jobs/discovery.py` and `price_monitor.py` are callable
   pipelines, not cron/queue-scheduled jobs yet.
 - **Order detection is manual.** There is no live marketplace webhook/poll creating `Order` rows

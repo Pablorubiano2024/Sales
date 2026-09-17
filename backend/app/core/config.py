@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     anthropic_api_key: str | None = None
     anthropic_model: str = "claude-sonnet-5"
 
+    # --- Dropi (supplier) ---
+    # Not yet integrated for real — see backend/app/integrations/dropi.py.
+    dropi_integration_key: str | None = None
+
     # --- Arbitrage thresholds (defaults; configurable, never hard-coded inline) ---
     min_roi: Decimal = Decimal("0.30")
     min_net_profit: Decimal = Decimal("20000")
