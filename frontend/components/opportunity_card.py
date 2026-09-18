@@ -30,11 +30,19 @@ def render_opportunity_detail(opportunity: dict, product: dict | None) -> None:
     col2.metric("ROI", f"{opportunity['roi']:.1%}")
     col3.metric("Margen", f"{opportunity['margin']:.1%}")
 
+    st.info(
+        "💡 El **precio de venta** usado aquí es una estimación (multiplicador sobre el "
+        "precio de compra) — todavía no viene de una búsqueda real en MercadoLibre. Antes "
+        "de publicar o comprar con dinero real, verifica manualmente contra 2-3 "
+        "publicaciones genéricas (sin marca reconocida) similares en MercadoLibre: la "
+        "dispersión de precios entre genéricos y marcas conocidas es grande."
+    )
+
     with st.expander("Desglose de costos", expanded=False):
         st.write(
             {
                 "Precio de compra": opportunity["buy_price"],
-                "Precio de venta": opportunity["sell_price"],
+                "Precio de venta (estimado)": opportunity["sell_price"],
                 "Comisión del marketplace": opportunity["marketplace_fee"],
                 "Costo de envío": opportunity["shipping_cost"],
                 "Impuestos": opportunity["tax_cost"],
