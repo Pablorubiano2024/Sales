@@ -20,6 +20,12 @@ load_dotenv()
 API_BASE_URL = os.environ.get("BACKEND_API_URL", "http://127.0.0.1:8000")
 API_AUTH_TOKEN = os.environ.get("API_AUTH_TOKEN")
 
+# Generous enough to survive Render's free-tier cold start (the backend
+# service spins down after idle and can take 20-30s+ to wake up on the
+# first request) without making every normal, already-warm request feel
+# slow — a warm backend still responds in well under a second.
+_REQUEST_TIMEOUT = 45.0
+
 
 class ApiError(RuntimeError):
     pass
@@ -31,7 +37,7 @@ def _request(method: str, path: str, **kwargs: Any) -> Any:
     if API_AUTH_TOKEN:
         headers["X-API-Key"] = API_AUTH_TOKEN
     try:
-        response = httpx.request(method, url, timeout=10.0, headers=headers, **kwargs)
+        response = httpx.request(method, url, timeout=_REQUEST_TIMEOUT, headers=headers, **kwargs)
         response.raise_for_status()
         return response.json()
     except httpx.HTTPStatusError as exc:
@@ -41,6 +47,12 @@ def _request(method: str, path: str, **kwargs: Any) -> Any:
         raise ApiError(
             f"No se pudo conectar con el backend en {API_BASE_URL}. "
             "¿Está corriendo el servidor de FastAPI?"
+        ) from exc
+    except httpx.TimeoutException as exc:
+        raise ApiError(
+            f"El backend en {API_BASE_URL} no respondió a tiempo. Si acaba de "
+            "estar inactivo (plan gratuito de Render), puede tardar unos "
+            "segundos en despertar — intenta de nuevo."
         ) from exc
 
 
