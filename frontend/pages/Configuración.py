@@ -5,9 +5,11 @@ from __future__ import annotations
 import api_client
 import streamlit as st
 from auth_gate import require_password
+from theme import inject_base_styles
 
 st.set_page_config(page_title="Configuración", page_icon="⚙️", layout="wide")
 require_password()
+inject_base_styles()
 st.title("⚙️ Configuración")
 
 try:

@@ -6,9 +6,11 @@ import api_client
 import pandas as pd
 import streamlit as st
 from auth_gate import require_password
+from theme import inject_base_styles
 
 st.set_page_config(page_title="Productos", page_icon="🛒", layout="wide")
 require_password()
+inject_base_styles()
 st.title("🛒 Productos")
 
 try:
@@ -33,7 +35,7 @@ else:
             "created_at": "Creado",
         }
     )
-    st.dataframe(df, use_container_width=True, hide_index=True)
+    st.dataframe(df, width="stretch", hide_index=True)
 
 st.divider()
 st.subheader("Agregar un producto")

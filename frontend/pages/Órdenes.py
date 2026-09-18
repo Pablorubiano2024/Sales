@@ -6,9 +6,11 @@ import api_client
 import streamlit as st
 from auth_gate import require_password
 from components.tables import render_orders_table
+from theme import inject_base_styles
 
 st.set_page_config(page_title="Órdenes", page_icon="📦", layout="wide")
 require_password()
+inject_base_styles()
 st.title("📦 Órdenes")
 st.caption(
     "No se mantiene inventario. Cuando se detecta una venta, hay que comprar "

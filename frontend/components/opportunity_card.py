@@ -7,18 +7,28 @@ import json
 import api_client
 import streamlit as st
 from i18n import opportunity_status_label
+from theme import status_badge_html
 
 
 def render_opportunity_detail(opportunity: dict, product: dict | None) -> None:
     product_name = product.get("name") if product else opportunity["product_id"]
-    st.subheader(product_name)
-    st.caption(f"ID de oportunidad: {opportunity['id']}")
 
-    col1, col2, col3, col4 = st.columns(4)
+    title_col, badge_col = st.columns([4, 1])
+    with title_col:
+        st.subheader(product_name)
+        st.caption(f"ID de oportunidad: {opportunity['id']}")
+    with badge_col:
+        badge_label = opportunity_status_label(opportunity["status"]).upper()
+        badge_html = status_badge_html(opportunity["status"], badge_label)
+        st.markdown(
+            f'<div style="text-align:right; padding-top:8px;">{badge_html}</div>',
+            unsafe_allow_html=True,
+        )
+
+    col1, col2, col3 = st.columns(3)
     col1.metric("Ganancia neta", f"${opportunity['net_profit']:,.0f}")
     col2.metric("ROI", f"{opportunity['roi']:.1%}")
     col3.metric("Margen", f"{opportunity['margin']:.1%}")
-    col4.metric("Estado", opportunity_status_label(opportunity["status"]).upper())
 
     with st.expander("Desglose de costos", expanded=False):
         st.write(

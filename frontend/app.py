@@ -10,14 +10,19 @@ datos obtenidos por HTTP.
 
 from __future__ import annotations
 
+import altair as alt
 import api_client
+import pandas as pd
 import streamlit as st
 from auth_gate import require_password
 from components.metrics import render_dashboard_metrics
+from i18n import opportunity_status_label
+from theme import OPPORTUNITY_STATUS_COLORS, inject_base_styles
 
 st.set_page_config(page_title="Panel de Arbitraje", page_icon="📦", layout="wide")
 
 require_password()
+inject_base_styles()
 
 st.title("📦 Panel de Arbitraje de Productos")
 st.caption(
@@ -54,18 +59,64 @@ render_dashboard_metrics(
     pending_orders=len(pending_orders),
 )
 
+st.write("")
+
+if opportunities:
+    status_order = ["approved", "promising", "review", "rejected"]
+    counts = {s: 0 for s in status_order}
+    for opp in opportunities:
+        counts[opp["status"]] = counts.get(opp["status"], 0) + 1
+
+    chart_df = pd.DataFrame(
+        [
+            {"Estado": opportunity_status_label(s), "Cantidad": counts[s]}
+            for s in status_order
+            if counts[s] > 0
+        ]
+    )
+    color_scale = alt.Scale(
+        domain=[opportunity_status_label(s) for s in status_order],
+        range=[OPPORTUNITY_STATUS_COLORS[s][1] for s in status_order],
+    )
+
+    col_chart, col_summary = st.columns([2, 1])
+    with col_chart:
+        st.markdown("##### Oportunidades por estado")
+        chart = (
+            alt.Chart(chart_df)
+            .mark_bar(cornerRadiusTopLeft=6, cornerRadiusTopRight=6, size=48)
+            .encode(
+                x=alt.X("Estado:N", title=None, sort=None),
+                y=alt.Y("Cantidad:Q", title=None),
+                color=alt.Color("Estado:N", scale=color_scale, legend=None),
+                tooltip=["Estado", "Cantidad"],
+            )
+            .properties(height=240)
+        )
+        st.altair_chart(chart, width="stretch")
+    with col_summary:
+        st.markdown("##### Resumen")
+        for s in status_order:
+            if counts[s] > 0:
+                st.write(f"**{opportunity_status_label(s)}:** {counts[s]}")
+
 st.divider()
+
 st.subheader("Para empezar")
-st.markdown(
-    """
-    Usa las páginas del menú lateral para:
-    - **Oportunidades** — revisar, filtrar y analizar oportunidades de arbitraje
-    - **Productos** — explorar el catálogo de productos
-    - **Órdenes** — hacer seguimiento a órdenes pendientes de compra manual al proveedor
-    - **Marketplaces** — ver los canales de venta configurados
-    - **Configuración** — ver los umbrales de rentabilidad actuales
-    """
-)
+link_cols = st.columns(5)
+links = [
+    ("📈", "Oportunidades", "revisar, filtrar y analizar"),
+    ("🛒", "Productos", "explorar el catálogo"),
+    ("📦", "Órdenes", "seguimiento de compras al proveedor"),
+    ("🏪", "Marketplaces", "canales de venta configurados"),
+    ("⚙️", "Configuración", "umbrales de rentabilidad"),
+]
+for col, (icon, name, desc) in zip(link_cols, links, strict=True):
+    with col:
+        with st.container(border=True):
+            st.markdown(f"### {icon}")
+            st.markdown(f"**{name}**")
+            st.caption(desc)
 
 if not marketplaces:
     st.info(
