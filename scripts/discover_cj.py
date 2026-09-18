@@ -13,6 +13,12 @@ Prices from CJ are in USD; `run_discovery` converts them to COP (via
 against the COP-denominated thresholds — update `USD_TO_COP_RATE` in your
 .env if it's drifted from the official TRM.
 
+`run_discovery` also subtracts an estimated marketplace commission and
+shipping cost (Settings.marketplace_commission_pct / shipping_cost_cop) —
+these are single configurable estimates, not a real per-category ML fee or
+a real CJ freight quote, so net_profit here is a realistic ballpark, not
+an exact number. Verify manually before listing anything with real money.
+
 Usage:
     python scripts/discover_cj.py
 """

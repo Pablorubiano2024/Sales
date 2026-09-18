@@ -76,3 +76,35 @@ def test_usd_source_price_is_converted_to_cop_before_evaluation(
     assert opportunity is not None
     # $10 USD * 4000 COP/USD = 40,000 COP — not 10.
     assert opportunity.buy_price == Decimal("40000.00")
+
+
+def test_marketplace_fee_and_shipping_are_deducted(
+    db_session: Session, _fixed_rate_settings: Settings
+) -> None:
+    """A discovered opportunity must reflect real marketplace commission and
+    shipping, not just the raw buy price — see Settings.marketplace_commission_pct
+    / shipping_cost_cop and their history in config.py."""
+    source = Source(name="Fake USD Source", source_type=SourceType.API)
+    marketplace = Marketplace(name="Test Marketplace")
+    db_session.add_all([source, marketplace])
+    db_session.commit()
+    db_session.refresh(source)
+    db_session.refresh(marketplace)
+
+    opportunity_ids = run_discovery(
+        db_session, source, _FakeUsdAdapter(), marketplace.id, queries=["earbuds"]
+    )
+    opportunity = db_session.get(Opportunity, opportunity_ids[0])
+    assert opportunity is not None
+
+    # sell = 40,000 * 1.8 = 72,000; fee = 72,000 * 0.15 (default) = 10,800
+    assert opportunity.marketplace_fee == Decimal("10800.00")
+    assert opportunity.shipping_cost == _fixed_rate_settings.shipping_cost_cop
+    # Confirms these costs actually reduce net_profit rather than being
+    # computed-but-ignored.
+    assert opportunity.net_profit == (
+        opportunity.sell_price
+        - opportunity.buy_price
+        - opportunity.marketplace_fee
+        - opportunity.shipping_cost
+    )

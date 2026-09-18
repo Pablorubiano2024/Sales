@@ -23,6 +23,8 @@ class SettingsRead(BaseModel):
     max_risk_score: float
     claude_configured: bool
     usd_to_cop_rate: float
+    marketplace_commission_pct: float
+    shipping_cost_cop: float
 
 
 @router.get("", response_model=SettingsRead)
@@ -36,4 +38,6 @@ def get_app_settings() -> SettingsRead:
         max_risk_score=settings.max_risk_score,
         claude_configured=bool(settings.anthropic_api_key),
         usd_to_cop_rate=float(settings.usd_to_cop_rate),
+        marketplace_commission_pct=float(settings.marketplace_commission_pct),
+        shipping_cost_cop=float(settings.shipping_cost_cop),
     )

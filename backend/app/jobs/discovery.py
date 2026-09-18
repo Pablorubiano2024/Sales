@@ -101,6 +101,16 @@ def run_discovery(
                 Decimal("0.01")
             )
 
+            # The marketplace takes a real cut and shipping is a real cost —
+            # omitting them (as this job did until 2026-09-18) makes
+            # "net_profit" actually gross margin, overstating every
+            # opportunity. Both are single configurable estimates rather
+            # than a precise per-product/per-category lookup — see
+            # Settings.marketplace_commission_pct / shipping_cost_cop.
+            marketplace_fee = (estimated_sell_price * settings.marketplace_commission_pct).quantize(
+                Decimal("0.01")
+            )
+
             opportunity = evaluate_opportunity(
                 db,
                 OpportunityCreate(
@@ -109,6 +119,8 @@ def run_discovery(
                     marketplace_id=marketplace_id,
                     buy_price=float(buy_price_cop),
                     sell_price=float(estimated_sell_price),
+                    marketplace_fee=float(marketplace_fee),
+                    shipping_cost=float(settings.shipping_cost_cop),
                 ),
             )
             created_opportunity_ids.append(opportunity.id)

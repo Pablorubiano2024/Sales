@@ -28,6 +28,18 @@ st.caption(
     "en cuando y actualiza `USD_TO_COP_RATE` en tu .env si se ha alejado mucho."
 )
 
+st.write("")
+col6, col7 = st.columns(2)
+col6.metric("Comisión de marketplace", f"{settings['marketplace_commission_pct']:.0%}")
+col7.metric("Envío estimado", f"${settings['shipping_cost_cop']:,.0f}")
+st.caption(
+    "Se restan al calcular la ganancia de cada oportunidad descubierta. La comisión "
+    "de MercadoLibre Colombia real va del 8% al 19% según categoría (hasta 22% con "
+    "cuotas extra) — verifica la tuya en mercadolibre.com.co/ayuda. El envío es una "
+    "estimación (CJ→Colombia + envío nacional subsidiado), no un dato exacto por "
+    "producto — ajusta `MARKETPLACE_COMMISSION_PCT` / `SHIPPING_COST_COP` en tu .env."
+)
+
 st.divider()
 st.write(f"**Entorno:** {settings['app_env']}")
 

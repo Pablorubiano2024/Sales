@@ -69,6 +69,20 @@ class Settings(BaseSettings):
     # the TRM as of 2026-09-18 (~3,130-3,150 COP/USD).
     usd_to_cop_rate: Decimal = Decimal("3130")
 
+    # --- Real marketplace + shipping costs applied during discovery ---
+    # These were missing from run_discovery until 2026-09-18: opportunities
+    # only subtracted buy_price, so "net_profit" was actually gross margin,
+    # overstating profitability. Verified live against MercadoLibre
+    # Colombia's own help page (mercadolibre.com.co/ayuda): sale commission
+    # is 8%-19% depending on category (up to 22% with extra installments) —
+    # 15% here is a reasonable single default, not a per-category lookup.
+    marketplace_commission_pct: Decimal = Decimal("0.15")
+    # Estimated, NOT verified per-product — CJdropshipping's real freight
+    # calculator (per product + destination) will differ. Covers
+    # CJ China->Colombia shipping plus the seller-subsidized portion of
+    # MercadoLibre's "envío gratis". Update if you have real freight data.
+    shipping_cost_cop: Decimal = Decimal("29000")
+
     @property
     def sqlalchemy_database_url(self) -> str:
         """`database_url`, normalized for SQLAlchemy.
