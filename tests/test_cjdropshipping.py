@@ -66,6 +66,7 @@ def _adapter(handler) -> CJDropshippingAdapter:
     return CJDropshippingAdapter(
         api_key="CJUserNum@api@fake-key",
         transport=httpx.MockTransport(handler),
+        min_interval=0,  # don't actually wait 1s/request in tests
     )
 
 
@@ -112,7 +113,9 @@ def test_not_configured_returns_empty_without_network_call() -> None:
         called = True
         return httpx.Response(200, json=LOGIN_OK)
 
-    adapter = CJDropshippingAdapter(api_key=None, transport=httpx.MockTransport(handler))
+    adapter = CJDropshippingAdapter(
+        api_key=None, transport=httpx.MockTransport(handler), min_interval=0
+    )
     assert adapter.search_products("anything") == []
     assert called is False
 
@@ -175,3 +178,60 @@ def test_expired_token_triggers_relogin_once() -> None:
 def test_get_product_url_returns_none() -> None:
     adapter = _adapter(lambda request: httpx.Response(500))
     assert adapter.get_product_url("pid-1") is None
+
+
+def test_get_product_with_null_inventories_defaults_to_available() -> None:
+    """Regression test: CJ's real /product/query frequently returns
+    `variants[].inventories: null` even for well-stocked products (observed
+    live 2026-09-18 on a product listV2 showed with 149128 units in stock).
+    Must not crash and must not report false out-of-stock."""
+    detail_with_null_inventories = {
+        "code": 200,
+        "result": True,
+        "data": {
+            "pid": "pid-2",
+            "productNameEn": "Some Product",
+            "sellPrice": "1.00",
+            "variants": [
+                {"vid": "v1", "variantSellPrice": 1.0, "inventoryNum": None, "inventories": None}
+            ],
+        },
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("getAccessToken"):
+            return httpx.Response(200, json=LOGIN_OK)
+        return httpx.Response(200, json=detail_with_null_inventories)
+
+    adapter = _adapter(handler)
+    product = adapter.get_product("pid-2")
+
+    assert product is not None
+    assert product.stock_available is True
+
+
+def test_throttle_sleeps_between_real_requests(monkeypatch) -> None:
+    sleep_calls: list[float] = []
+    monkeypatch.setattr("backend.app.integrations.cjdropshipping.time.sleep", sleep_calls.append)
+
+    adapter = CJDropshippingAdapter(
+        api_key="CJUserNum@api@fake-key",
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, json=LOGIN_OK)),
+        min_interval=100.0,  # deliberately huge so the second call must throttle
+    )
+    adapter._login()
+    adapter._login()
+
+    assert len(sleep_calls) == 1
+    assert sleep_calls[0] > 0
+
+
+def test_min_interval_zero_never_sleeps(monkeypatch) -> None:
+    sleep_calls: list[float] = []
+    monkeypatch.setattr("backend.app.integrations.cjdropshipping.time.sleep", sleep_calls.append)
+
+    adapter = _adapter(lambda request: httpx.Response(200, json=LOGIN_OK))
+    adapter._login()
+    adapter._login()
+
+    assert sleep_calls == []

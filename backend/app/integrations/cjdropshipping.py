@@ -42,9 +42,13 @@ publicly documented API (create an account, generate an API Key yourself
 — no partner/white-label approval needed), unlike Dropi as of this
 writing (see PROJECT_CONTEXT.md).
 
-Rate limit per CJ's own docs: 1 request/second. This adapter does not
-implement client-side throttling (MVP) — a future scheduled job (see
-backend/app/jobs/) should pace calls if it fans out across many products.
+Rate limit per CJ's own docs: 1 request/second — confirmed live (2026-09-18):
+four calls fired back-to-back (search + get_product + get_price +
+get_stock, the latter two each re-calling get_product) tripped
+`{"message": "Too Many Requests, QPS limit is 1 time/1second"}`. This
+adapter throttles itself to respect that (`min_interval`, default ~1.05s
+between real HTTP calls) rather than just failing gracefully and leaving
+callers to work around it.
 
 CJ does not document a public per-product storefront URL in the search/
 detail response fields above, so `get_product_url` returns None rather
@@ -53,6 +57,7 @@ than guessing one.
 
 from __future__ import annotations
 
+import time
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -66,6 +71,9 @@ logger = get_logger(__name__)
 
 BASE_URL = "https://developers.cjdropshipping.com"
 DEFAULT_TIMEOUT = 15.0
+# CJ's documented + confirmed-live limit is 1 request/second; a small margin
+# avoids landing exactly on the boundary.
+DEFAULT_MIN_INTERVAL = 1.05
 
 
 class CJDropshippingAdapter(SourceAdapter):
@@ -77,11 +85,24 @@ class CJDropshippingAdapter(SourceAdapter):
         base_url: str = BASE_URL,
         timeout: float = DEFAULT_TIMEOUT,
         transport: httpx.BaseTransport | None = None,
+        min_interval: float = DEFAULT_MIN_INTERVAL,
     ) -> None:
         settings = get_settings()
         self._api_key = api_key or settings.cj_api_key
         self._client = httpx.Client(base_url=base_url, timeout=timeout, transport=transport)
         self._access_token: str | None = None
+        self._min_interval = min_interval
+        self._last_request_at: float | None = None
+
+    def _throttle(self) -> None:
+        if self._min_interval <= 0 or self._last_request_at is None:
+            self._last_request_at = time.monotonic()
+            return
+        elapsed = time.monotonic() - self._last_request_at
+        remaining = self._min_interval - elapsed
+        if remaining > 0:
+            time.sleep(remaining)
+        self._last_request_at = time.monotonic()
 
     def close(self) -> None:
         self._client.close()
@@ -99,6 +120,7 @@ class CJDropshippingAdapter(SourceAdapter):
         if not self.is_configured():
             logger.info("CJdropshipping not configured (CJ_API_KEY unset).")
             return None
+        self._throttle()
         try:
             response = self._client.post(
                 "/api2.0/v1/authentication/getAccessToken",
@@ -127,6 +149,7 @@ class CJDropshippingAdapter(SourceAdapter):
         headers = self._headers()
         if headers is None:
             return None
+        self._throttle()
         try:
             response = self._client.get(path, params=params, headers=headers)
             payload = response.json()
@@ -140,6 +163,7 @@ class CJDropshippingAdapter(SourceAdapter):
             headers = self._headers()
             if headers is None:
                 return None
+            self._throttle()
             try:
                 response = self._client.get(path, params=params, headers=headers)
                 payload = response.json()
@@ -175,18 +199,29 @@ class CJDropshippingAdapter(SourceAdapter):
             logger.warning("CJdropshipping product %s has an unparseable price", data.get("pid"))
             return None
 
-        total_inventory = sum(
-            inv.get("totalInventory", 0)
-            for variant in data.get("variants", [])
-            for inv in variant.get("inventories", [])
-        )
+        # Confirmed live (2026-09-18): `variants[].inventories` is frequently
+        # `null` on this endpoint even for products with real, large stock
+        # per the *search* endpoint's `warehouseInventoryNum` (observed
+        # 149128 units on a product whose /product/query showed 0/20
+        # variants with any inventory data). Treat "no inventory data
+        # reported" as unknown-but-available rather than out-of-stock —
+        # defaulting to False here would silently reject real opportunities.
+        variants = data.get("variants") or []
+        inventory_entries = [
+            inv for variant in variants for inv in (variant.get("inventories") or [])
+        ]
+        if inventory_entries:
+            total_inventory = sum(inv.get("totalInventory", 0) for inv in inventory_entries)
+            stock_available = total_inventory > 0
+        else:
+            stock_available = True
 
         return SourceProductInfo(
             external_id=str(data["pid"]),
             name=data.get("productNameEn", f"Product {data['pid']}"),
             price=price,
             currency="USD",
-            stock_available=total_inventory > 0,
+            stock_available=stock_available,
             url=None,
             raw=data,
         )
