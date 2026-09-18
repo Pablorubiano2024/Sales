@@ -17,12 +17,14 @@ from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
+from backend.app.core.config import get_settings
 from backend.app.core.logging import get_logger
 from backend.app.integrations.base import SourceAdapter
 from backend.app.models.product import Product
 from backend.app.models.source import Source, SourceProduct
 from backend.app.schemas.opportunity import OpportunityCreate
 from backend.app.services.arbitrage_engine import evaluate_opportunity
+from backend.app.services.currency import convert_to_cop
 from backend.app.services.product_matcher import find_best_match
 
 logger = get_logger(__name__)
@@ -43,6 +45,7 @@ def run_discovery(
 
     Returns the list of created Opportunity ids.
     """
+    settings = get_settings()
     catalog = db.query(Product).all()
     created_opportunity_ids: list[str] = []
 
@@ -89,7 +92,12 @@ def run_discovery(
                 db.add(source_product)
                 db.commit()
 
-            estimated_sell_price = (candidate.price * estimated_sell_price_multiplier).quantize(
+            # Opportunities and thresholds (min_roi, min_net_profit) are all
+            # COP-denominated — a source quoting in another currency (e.g.
+            # CJdropshipping, in USD) has to be converted here, before the
+            # (currency-agnostic) pricing engine ever sees it.
+            buy_price_cop = convert_to_cop(candidate.price, candidate.currency, settings)
+            estimated_sell_price = (buy_price_cop * estimated_sell_price_multiplier).quantize(
                 Decimal("0.01")
             )
 
@@ -99,7 +107,7 @@ def run_discovery(
                     product_id=product.id,
                     source_id=source.id,
                     marketplace_id=marketplace_id,
-                    buy_price=float(candidate.price),
+                    buy_price=float(buy_price_cop),
                     sell_price=float(estimated_sell_price),
                 ),
             )

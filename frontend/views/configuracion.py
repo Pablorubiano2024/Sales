@@ -18,9 +18,18 @@ col1.metric("ROI mínimo", f"{settings['min_roi']:.0%}")
 col2.metric("Ganancia neta mínima", f"${settings['min_net_profit']:,.0f}")
 col3.metric("Riesgo máximo", f"{settings['max_risk_score']:.2f}")
 
+st.write("")
+col4, col5 = st.columns(2)
+col4.metric("Moneda por defecto", settings["default_currency"])
+col5.metric("Tasa USD → COP", f"${settings['usd_to_cop_rate']:,.0f}")
+st.caption(
+    "Se usa para convertir precios de fuentes en USD (como CJdropshipping) a COP "
+    "antes de calcular rentabilidad. Revisa la TRM oficial (banrep.gov.co) de vez "
+    "en cuando y actualiza `USD_TO_COP_RATE` en tu .env si se ha alejado mucho."
+)
+
 st.divider()
 st.write(f"**Entorno:** {settings['app_env']}")
-st.write(f"**Moneda por defecto:** {settings['default_currency']}")
 
 if settings["claude_configured"]:
     st.success("El enriquecimiento con Claude está configurado (ANTHROPIC_API_KEY definida).")

@@ -122,6 +122,7 @@ cp .env.example .env
 | `MIN_NET_PROFIT` | Opportunity engine threshold (COP) | `20000` |
 | `MAX_RISK_SCORE` | Opportunity engine threshold | `0.50` |
 | `DEFAULT_CURRENCY` | Display currency | `COP` |
+| `USD_TO_COP_RATE` | Manual USD→COP rate, used to convert source prices (e.g. CJdropshipping) before evaluating against COP thresholds — see `backend/app/services/currency.py` | `3130` |
 
 Never commit `.env` (it's git-ignored). `ANTHROPIC_API_KEY` is read only from the environment —
 it is never hard-coded.
@@ -182,9 +183,10 @@ poetry run python scripts/discover_cj.py
 
 The same pipeline against **CJdropshipping — an actual, working supplier** (requires `CJ_API_KEY`
 in `.env`; see `backend/app/integrations/cjdropshipping.py`). This creates real `Product` /
-`SourceProduct` / `Opportunity` rows from CJ's live catalog. Prices are real but in USD, so with
-COP-denominated thresholds (`MIN_NET_PROFIT` etc.) every resulting opportunity currently comes
-back `rejected` — that's the known currency-mismatch limitation below, not a bug.
+`SourceProduct` / `Opportunity` rows from CJ's live catalog. Prices are real, in USD; the
+discovery job converts them to COP (via `services/currency.py` and `USD_TO_COP_RATE`) before
+evaluating against the COP-denominated thresholds, so opportunities now classify normally
+(rejected/promising/approved) instead of always coming back rejected.
 
 ## Running tests
 
@@ -260,12 +262,17 @@ poetry run mypy backend
   may be scoped to white-label partners only. See `PROJECT_CONTEXT.md` before touching this file.
 - `mock_source.py` is a clearly-fake, in-memory catalog for tests; `dummyjson_source.py` makes
   real HTTP calls but against a public demo API, not a real supplier.
-- **No currency conversion.** `pricing_engine` does raw arithmetic on whatever numbers it's given
-  — it doesn't know or care what currency they're in. CJdropshipping's real prices are USD;
-  `MIN_ROI`/`MIN_NET_PROFIT`/`MAX_RISK_SCORE` are meant for COP amounts. Mixing them (e.g. via
-  `scripts/discover_cj.py`) means every opportunity currently comes back `rejected` regardless of
-  real profitability — either add FX conversion or source-specific thresholds before relying on
-  CJ-sourced opportunity statuses for real decisions.
+- **Currency conversion uses a manual, not live, FX rate.** `pricing_engine` itself stays
+  currency-agnostic by design; `backend/app/services/currency.py` converts USD source prices
+  (CJdropshipping) to COP before the discovery job evaluates them, using the configurable
+  `USD_TO_COP_RATE` setting rather than a live FX API call (rate drifts slowly enough that this is
+  accurate enough for arbitrage decisions — see the module docstring for the reasoning). Update
+  `USD_TO_COP_RATE` from the official TRM (banrep.gov.co) if it's drifted.
+- **No real marketplace sell-price data.** `run_discovery` estimates the selling price as a
+  configurable multiplier of the (converted) buy price — it does not look up what similar items
+  actually sell for on MercadoLibre (its public search API returned `403` as of this writing).
+  Validate a promising CJ-sourced opportunity's real MercadoLibre price manually before trusting
+  it for a real listing decision.
 - **No scheduler.** `backend/app/jobs/discovery.py` and `price_monitor.py` are callable
   pipelines, not cron/queue-scheduled jobs yet.
 - **Order detection is manual.** There is no live marketplace webhook/poll creating `Order` rows

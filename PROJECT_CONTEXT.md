@@ -94,9 +94,10 @@ supplier → supplier ships directly to customer → profit tracked.
   fix for `variants[].inventories` frequently being `null` even on well-stocked products — see
   the file's docstring). This is the project's actual functioning supplier integration right now.
   `scripts/discover_cj.py` runs the real discovery pipeline against it (contrast
-  `scripts/discover_demo.py`, which uses the fake DummyJSON source). Its opportunities currently
-  all classify as `rejected` because CJ's prices are USD and the thresholds are COP-denominated —
-  expected, not a bug (see README's Current Limitations, "No currency conversion").
+  `scripts/discover_demo.py`, which uses the fake DummyJSON source). Its USD prices are converted
+  to COP by `backend/app/services/currency.py` (a configurable `USD_TO_COP_RATE`, not a live FX
+  call) before evaluation, so opportunities now classify normally — verified live 2026-09-18 with
+  a fresh local DB: 4 approved, 3 promising, 13 rejected out of 20, instead of 20/20 rejected.
 - `backend/app/core/security.py` — the `API_AUTH_TOKEN` / `X-API-Key` check applied to all
   `/api/*` routers. A single shared secret, not a user system; replace it if a phase needs
   per-user auth.

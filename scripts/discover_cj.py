@@ -8,10 +8,10 @@ real, rate-limited API calls (CJ's documented limit is 1 req/second; the
 adapter self-throttles), so this can take a little while for several
 queries.
 
-Prices from CJ are in USD; `pricing_engine` does not convert currencies,
-so buy/sell here stay in the same (USD) unit — the resulting ROI/margin
-are still valid, but don't compare these opportunities' raw COP-labeled
-thresholds without accounting for that (see README's Current Limitations).
+Prices from CJ are in USD; `run_discovery` converts them to COP (via
+`services/currency.py` and `Settings.usd_to_cop_rate`) before evaluating
+against the COP-denominated thresholds — update `USD_TO_COP_RATE` in your
+.env if it's drifted from the official TRM.
 
 Usage:
     python scripts/discover_cj.py
@@ -73,8 +73,9 @@ def main() -> None:
             opp = db.get(Opportunity, opp_id)
             if opp is not None:
                 print(
-                    f"  - {opp.product.name[:60]}: buy=${opp.buy_price} sell=${opp.sell_price} "
-                    f"net_profit=${opp.net_profit} roi={opp.roi} status={opp.status.value}"
+                    f"  - {opp.product.name[:60]}: buy=${opp.buy_price} COP "
+                    f"sell=${opp.sell_price} COP net_profit=${opp.net_profit} COP "
+                    f"roi={opp.roi} status={opp.status.value}"
                 )
     finally:
         db.close()

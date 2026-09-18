@@ -22,6 +22,7 @@ class SettingsRead(BaseModel):
     min_net_profit: float
     max_risk_score: float
     claude_configured: bool
+    usd_to_cop_rate: float
 
 
 @router.get("", response_model=SettingsRead)
@@ -34,4 +35,5 @@ def get_app_settings() -> SettingsRead:
         min_net_profit=float(settings.min_net_profit),
         max_risk_score=settings.max_risk_score,
         claude_configured=bool(settings.anthropic_api_key),
+        usd_to_cop_rate=float(settings.usd_to_cop_rate),
     )

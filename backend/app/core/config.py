@@ -62,6 +62,12 @@ class Settings(BaseSettings):
 
     # --- Currency ---
     default_currency: str = "COP"
+    # USD -> COP rate used to convert source prices (e.g. CJdropshipping,
+    # which quotes in USD) before they reach the COP-denominated thresholds
+    # above. Not fetched live (see services/currency.py for why) — update
+    # this if it drifts from the official TRM (banrep.gov.co). Default is
+    # the TRM as of 2026-09-18 (~3,130-3,150 COP/USD).
+    usd_to_cop_rate: Decimal = Decimal("3130")
 
     @property
     def sqlalchemy_database_url(self) -> str:
