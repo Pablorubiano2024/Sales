@@ -5,6 +5,7 @@ the live-tested error messages recorded in cjdropshipping.py's docstring.
 
 from __future__ import annotations
 
+import json
 from decimal import Decimal
 
 import httpx
@@ -63,8 +64,7 @@ DETAIL_RESPONSE = {
 
 def _adapter(handler) -> CJDropshippingAdapter:
     return CJDropshippingAdapter(
-        email="me@example.com",
-        api_key="fake-key",
+        api_key="CJUserNum@api@fake-key",
         transport=httpx.MockTransport(handler),
     )
 
@@ -89,6 +89,21 @@ def test_search_products_logs_in_then_lists() -> None:
     assert any("getAccessToken" in c for c in calls)
 
 
+def test_login_sends_only_api_key() -> None:
+    seen_bodies = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("getAccessToken"):
+            seen_bodies.append(json.loads(request.content))
+            return httpx.Response(200, json=LOGIN_OK)
+        return httpx.Response(200, json=LIST_RESPONSE)
+
+    adapter = _adapter(handler)
+    adapter.search_products("earbuds")
+
+    assert seen_bodies == [{"apiKey": "CJUserNum@api@fake-key"}]
+
+
 def test_not_configured_returns_empty_without_network_call() -> None:
     called = False
 
@@ -97,9 +112,7 @@ def test_not_configured_returns_empty_without_network_call() -> None:
         called = True
         return httpx.Response(200, json=LOGIN_OK)
 
-    adapter = CJDropshippingAdapter(
-        email=None, api_key=None, transport=httpx.MockTransport(handler)
-    )
+    adapter = CJDropshippingAdapter(api_key=None, transport=httpx.MockTransport(handler))
     assert adapter.search_products("anything") == []
     assert called is False
 
@@ -108,7 +121,11 @@ def test_login_rejected_returns_empty() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             200,
-            json={"code": 1600300, "result": False, "message": "password must be not empty"},
+            json={
+                "code": 1600005,
+                "result": False,
+                "message": "APIkey is wrong, please check and try again",
+            },
         )
 
     adapter = _adapter(handler)

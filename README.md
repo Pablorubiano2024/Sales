@@ -239,11 +239,11 @@ poetry run mypy backend
   whose methods raise `NotImplementedError` with TODOs — it does not call any real endpoint.
   Wiring it up requires a registered MercadoLibre application, OAuth credentials, and verified
   endpoint documentation.
-- **`cjdropshipping.py` is the only real, working supplier integration** — set `CJ_EMAIL` and
-  `CJ_API_KEY` (from your own [CJdropshipping](https://developers.cjdropshipping.com) account) to
-  use it. It's a global (China-based) dropshipping supplier, not a Colombian one, so shipping
-  times to Colombia are longer than a local supplier's — it's here because its API is genuinely
-  self-serve and documented, unlike Dropi as of this writing.
+- **`cjdropshipping.py` is the only real, working supplier integration** — set `CJ_API_KEY` (from
+  your own CJdropshipping account: Apps → install "API" → "Get API Key" page) to use it. It's a
+  global (China-based) dropshipping supplier, not a Colombian one, so shipping times to Colombia
+  are longer than a local supplier's — it's here because its API is genuinely self-serve and
+  documented, unlike Dropi as of this writing.
 - **Dropi is not integrated.** `dropi.py` is a skeleton like `mercadolibre.py`. Dropi (dropi.co)
   matches this project's business model closely (local Colombian suppliers, pay-on-delivery), but
   its `/integrations/login` endpoint errored on a regular dropshipper account during testing — it

@@ -1,16 +1,26 @@
 """CJdropshipping supplier adapter — a REAL, verified integration.
 
-Unlike `dropi.py` (skeleton, unverified) this is built against confirmed
-official documentation at https://developers.cjdropshipping.com and
-endpoints tested live before writing this file (2026-09-17):
+Unlike `dropi.py` (skeleton, unverified) this is built against official
+documentation the user pulled directly from their own CJdropshipping
+account (Get API Key page), cross-checked live before writing this file
+(2026-09-17):
 
   POST /api2.0/v1/authentication/getAccessToken
-      body: {"email": ..., "password": <your generated API Key>}
-      -> {"data": {"accessToken": ..., "accessTokenExpiryDate": ...}}
-      Confirmed live: an empty body returns
-      {"message": "email must be not empty."}; email-only returns
-      {"message": "password must be not empty"} — real validation, not
-      invented.
+      body: {"apiKey": "CJUserNum@api@..."}  (from CJ's Apps -> API app ->
+      "Get API Key" page — NOT email/password; an earlier version of this
+      file used email+password based on a third-party doc mirror that
+      turned out to be outdated, caught by live-testing this exact call)
+      -> {"data": {"openId", "accessToken", "accessTokenExpiryDate"
+           (180 days), "refreshToken", "refreshTokenExpiryDate"
+           (180 days), "createDate"}}
+      Confirmed live: a malformed apiKey returns
+      {"code": 1600005, "message": "APIkey is wrong, please check and
+      try again"} — real validation, not invented.
+
+  POST /api2.0/v1/authentication/refreshAccessToken
+      body: {"refreshToken": "..."}  -> same shape as getAccessToken.
+      Not implemented here yet (access tokens last 180 days, well beyond
+      this process's lifetime) — add if a long-lived worker needs it.
 
   GET /api2.0/v1/product/listV2?keyWord=&page=&size=
       header: CJ-Access-Token: <accessToken>
@@ -63,14 +73,12 @@ class CJDropshippingAdapter(SourceAdapter):
 
     def __init__(
         self,
-        email: str | None = None,
         api_key: str | None = None,
         base_url: str = BASE_URL,
         timeout: float = DEFAULT_TIMEOUT,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
         settings = get_settings()
-        self._email = email or settings.cj_email
         self._api_key = api_key or settings.cj_api_key
         self._client = httpx.Client(base_url=base_url, timeout=timeout, transport=transport)
         self._access_token: str | None = None
@@ -85,16 +93,16 @@ class CJDropshippingAdapter(SourceAdapter):
         self.close()
 
     def is_configured(self) -> bool:
-        return bool(self._email and self._api_key)
+        return bool(self._api_key)
 
     def _login(self) -> str | None:
         if not self.is_configured():
-            logger.info("CJdropshipping not configured (CJ_EMAIL/CJ_API_KEY unset).")
+            logger.info("CJdropshipping not configured (CJ_API_KEY unset).")
             return None
         try:
             response = self._client.post(
                 "/api2.0/v1/authentication/getAccessToken",
-                json={"email": self._email, "password": self._api_key},
+                json={"apiKey": self._api_key},
             )
             payload = response.json()
         except (httpx.HTTPError, ValueError) as exc:

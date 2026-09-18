@@ -127,7 +127,12 @@ supplier → supplier ships directly to customer → profit tracked.
   the user, no partner approval needed. See `cjdropshipping.py`. Trade-off: it's a China-based
   global supplier, not a Colombian one, so shipping times to Colombia are longer than Dropi's
   promised 24-72h — keep Dropi as the long-term goal if support unblocks it, but CJ is what
-  actually works today.
+  actually works today. Auth note: `POST /integrations/authentication/getAccessToken` initially
+  looked like it took `{email, password}` (per a `.cn`-domain doc mirror found via search), but
+  the user pasted the *actual* docs from inside their own CJ account showing the real, current
+  auth is `{"apiKey": "CJUserNum@api@..."}` only — confirmed live (a bad key returns
+  `{"code": 1600005, "message": "APIkey is wrong..."}`). The email/password version was wrong;
+  trust the user's own account docs over search-engine-found mirrors when they conflict.
 
 ## DEPLOYED STATE (as of 2026-09-17)
 

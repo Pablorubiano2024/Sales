@@ -51,9 +51,8 @@ class Settings(BaseSettings):
     dropi_integration_key: str | None = None
 
     # --- CJdropshipping (supplier) ---
-    # Real, verified self-serve API (developers.cjdropshipping.com). Create an
-    # account there, generate an API Key from your account, and set both.
-    cj_email: str | None = None
+    # Real, verified self-serve API (developers.cjdropshipping.com). Generate
+    # the key from your CJ account: Apps -> install "API" -> Get API Key page.
     cj_api_key: str | None = None
 
     # --- Arbitrage thresholds (defaults; configurable, never hard-coded inline) ---
