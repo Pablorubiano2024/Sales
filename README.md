@@ -172,9 +172,17 @@ poetry run python scripts/discover_demo.py
 Exercises the real discovery pipeline (`jobs/discovery.run_discovery`) against
 `DummyJsonSourceAdapter` — a genuine HTTP integration (real requests, real error handling)
 against the public [DummyJSON](https://dummyjson.com) demo product API. It is **not** a real
-Colombian supplier (prices are fictional and in USD), but it proves out the adapter pattern so a
-real source (e.g. Dropi, once you have an account/integration key) can be dropped in later
-without touching `services/` or `jobs/`.
+supplier (prices are fictional and in USD), but it proves out the adapter pattern.
+
+```bash
+poetry run python scripts/discover_cj.py
+```
+
+The same pipeline against **CJdropshipping — an actual, working supplier** (requires `CJ_API_KEY`
+in `.env`; see `backend/app/integrations/cjdropshipping.py`). This creates real `Product` /
+`SourceProduct` / `Opportunity` rows from CJ's live catalog. Prices are real but in USD, so with
+COP-denominated thresholds (`MIN_NET_PROFIT` etc.) every resulting opportunity currently comes
+back `rejected` — that's the known currency-mismatch limitation below, not a bug.
 
 ## Running tests
 
@@ -250,6 +258,12 @@ poetry run mypy backend
   may be scoped to white-label partners only. See `PROJECT_CONTEXT.md` before touching this file.
 - `mock_source.py` is a clearly-fake, in-memory catalog for tests; `dummyjson_source.py` makes
   real HTTP calls but against a public demo API, not a real supplier.
+- **No currency conversion.** `pricing_engine` does raw arithmetic on whatever numbers it's given
+  — it doesn't know or care what currency they're in. CJdropshipping's real prices are USD;
+  `MIN_ROI`/`MIN_NET_PROFIT`/`MAX_RISK_SCORE` are meant for COP amounts. Mixing them (e.g. via
+  `scripts/discover_cj.py`) means every opportunity currently comes back `rejected` regardless of
+  real profitability — either add FX conversion or source-specific thresholds before relying on
+  CJ-sourced opportunity statuses for real decisions.
 - **No scheduler.** `backend/app/jobs/discovery.py` and `price_monitor.py` are callable
   pipelines, not cron/queue-scheduled jobs yet.
 - **Order detection is manual.** There is no live marketplace webhook/poll creating `Order` rows

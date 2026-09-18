@@ -89,8 +89,14 @@ supplier → supplier ships directly to customer → profit tracked.
   `mercadolibre.py` (every method raises `NotImplementedError` with a TODO). Blocked — see
   VERIFIED FINDINGS below before touching this.
 - `backend/app/integrations/cjdropshipping.py` — a REAL, working `SourceAdapter` against
-  CJdropshipping's documented API (login, product search, product detail all confirmed live).
-  This is the project's actual functioning supplier integration right now.
+  CJdropshipping's documented API (login, product search, product detail all confirmed live
+  against the user's own account, including a self-throttle for CJ's real 1 req/sec limit and a
+  fix for `variants[].inventories` frequently being `null` even on well-stocked products — see
+  the file's docstring). This is the project's actual functioning supplier integration right now.
+  `scripts/discover_cj.py` runs the real discovery pipeline against it (contrast
+  `scripts/discover_demo.py`, which uses the fake DummyJSON source). Its opportunities currently
+  all classify as `rejected` because CJ's prices are USD and the thresholds are COP-denominated —
+  expected, not a bug (see README's Current Limitations, "No currency conversion").
 - `backend/app/core/security.py` — the `API_AUTH_TOKEN` / `X-API-Key` check applied to all
   `/api/*` routers. A single shared secret, not a user system; replace it if a phase needs
   per-user auth.

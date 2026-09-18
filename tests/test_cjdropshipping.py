@@ -7,9 +7,11 @@ from __future__ import annotations
 
 import json
 from decimal import Decimal
+from types import SimpleNamespace
 
 import httpx
 
+from backend.app.integrations import cjdropshipping as cj_module
 from backend.app.integrations.cjdropshipping import CJDropshippingAdapter
 
 LOGIN_OK = {
@@ -105,7 +107,11 @@ def test_login_sends_only_api_key() -> None:
     assert seen_bodies == [{"apiKey": "CJUserNum@api@fake-key"}]
 
 
-def test_not_configured_returns_empty_without_network_call() -> None:
+def test_not_configured_returns_empty_without_network_call(monkeypatch) -> None:
+    # Explicitly stub settings so this doesn't depend on whether the
+    # developer's own .env happens to have a real CJ_API_KEY set.
+    monkeypatch.setattr(cj_module, "get_settings", lambda: SimpleNamespace(cj_api_key=None))
+
     called = False
 
     def handler(request: httpx.Request) -> httpx.Response:
