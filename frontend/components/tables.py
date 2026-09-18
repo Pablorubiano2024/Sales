@@ -10,10 +10,15 @@ from theme import order_status_colors, status_colors
 _PILL_STYLE = "font-weight:600; border-radius:6px; padding:2px 8px;"
 
 
-def render_opportunities_table(opportunities: list[dict], products_by_id: dict[str, dict]) -> None:
+def render_opportunities_table(
+    opportunities: list[dict], products_by_id: dict[str, dict]
+) -> dict | None:
+    """Renders the opportunities table and returns the clicked row's full
+    opportunity dict (or None if nothing is selected) — the caller uses
+    this to show detail right below the table, no separate picker needed."""
     if not opportunities:
         st.info("Ninguna oportunidad coincide con los filtros actuales.")
-        return
+        return None
 
     rows = []
     status_values = []
@@ -59,7 +64,18 @@ def render_opportunities_table(opportunities: list[dict], products_by_id: dict[s
         },
         na_rep="—",
     ).apply(_color_estado, axis=1)
-    st.dataframe(styled, width="stretch", hide_index=True)
+    event = st.dataframe(
+        styled,
+        width="stretch",
+        hide_index=True,
+        key="opportunities_table",
+        on_select="rerun",
+        selection_mode="single-row",
+    )
+    selected_rows = event.selection.rows if event and event.selection else []
+    if selected_rows:
+        return opportunities[selected_rows[0]]
+    return None
 
 
 def render_orders_table(orders: list[dict], products_by_id: dict[str, dict]) -> None:

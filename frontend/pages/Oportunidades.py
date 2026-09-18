@@ -50,26 +50,13 @@ if category_filter != "Todas":
     ]
 filtered = [o for o in filtered if o["risk_score"] is None or o["risk_score"] <= max_risk]
 
-render_opportunities_table(filtered, products_by_id)
+st.caption("Haz clic en una fila de la tabla para ver el detalle completo abajo.")
+selected_opportunity = render_opportunities_table(filtered, products_by_id)
 
 st.divider()
-st.subheader("Detalle de la oportunidad")
 
-if filtered:
-    options = {
-        f"{products_by_id.get(o['product_id'], {}).get('name', o['product_id'])} "
-        f"(ROI {o['roi']:.0%}, neto ${o['net_profit']:,.0f})": o["id"]
-        for o in filtered
-    }
-    selected_label = st.selectbox("Selecciona una oportunidad", list(options.keys()))
-    selected_id = options[selected_label]
-
-    try:
-        opportunity = api_client.get_opportunity(selected_id)
-    except api_client.ApiError as exc:
-        st.error(str(exc))
-    else:
-        product = products_by_id.get(opportunity["product_id"])
-        render_opportunity_detail(opportunity, product)
-else:
-    st.info("Ninguna oportunidad coincide con los filtros actuales.")
+if selected_opportunity:
+    product = products_by_id.get(selected_opportunity["product_id"])
+    render_opportunity_detail(selected_opportunity, product)
+elif filtered:
+    st.info("☝️ Selecciona una fila de la tabla de arriba para ver el detalle.")
