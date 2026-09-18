@@ -1,18 +1,13 @@
-"""Página de Oportunidades: tabla filtrable + vista de detalle con acciones de IA."""
+"""Vista de Oportunidades: tabla filtrable + detalle con acciones de IA."""
 
 from __future__ import annotations
 
 import api_client
 import streamlit as st
-from auth_gate import require_password
 from components.opportunity_card import render_opportunity_detail
 from components.tables import render_opportunities_table
 from i18n import OPPORTUNITY_STATUS_LABELS
-from theme import inject_base_styles
 
-st.set_page_config(page_title="Oportunidades", page_icon="📈", layout="wide")
-require_password()
-inject_base_styles()
 st.title("📈 Oportunidades")
 
 try:

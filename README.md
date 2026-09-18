@@ -55,11 +55,13 @@ backend/app/
   jobs/               discovery / price-monitor pipelines (callable now, schedulable later)
 
 frontend/
-  app.py              Streamlit dashboard entrypoint (UI text is in Spanish — see note below)
+  app.py              Navigation shell only: page config, auth gate, styles, and
+                       st.navigation(position="top") — the top nav bar (see below)
   api_client.py        HTTP client calling the FastAPI backend
   auth_gate.py          optional APP_PASSWORD gate for public deployments
   i18n.py               English (API) -> Spanish (UI) status label mapping
-  pages/               Oportunidades, Productos, Órdenes, Marketplaces, Configuración
+  views/               Inicio, Oportunidades, Productos, Órdenes, Marketplaces, Configuración
+                       (the actual page content — UI text is in Spanish, see note below)
   components/           metrics, tables, opportunity detail card
 
 tests/                pytest suite (pricing, classification, API, health)
