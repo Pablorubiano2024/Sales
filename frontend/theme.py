@@ -83,21 +83,48 @@ def inject_base_styles() -> None:
         [data-testid="stMetric"] {
             background-color: #1E293B;
             border: 1px solid #334155;
-            border-radius: 12px;
-            padding: 16px 20px;
+            border-radius: 14px;
+            padding: 24px 28px;
         }
 
         [data-testid="stMetricLabel"] {
             font-weight: 500;
             color: #9CA3AF;
+            font-size: 1rem;
+        }
+
+        [data-testid="stMetricValue"] {
+            font-size: 2.1rem;
         }
 
         h1, h2, h3 {
             font-weight: 700;
         }
 
+        h1 {
+            font-size: 2.3rem;
+        }
+
+        h3, [data-testid="stMarkdownContainer"] h5 {
+            font-size: 1.25rem;
+        }
+
+        .block-container {
+            padding-top: 2.5rem;
+            padding-bottom: 3rem;
+            max-width: 1400px;
+        }
+
         [data-testid="stSidebar"] {
             border-right: 1px solid #334155;
+        }
+
+        [data-testid="stVerticalBlockBorderWrapper"] {
+            padding: 4px;
+        }
+
+        [data-testid="stPageLink"] p {
+            font-size: 1.05rem;
         }
         </style>
         """,

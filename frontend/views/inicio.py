@@ -74,24 +74,25 @@ if opportunities:
 
     col_chart, col_summary = st.columns([2, 1])
     with col_chart:
-        st.markdown("##### Oportunidades por estado")
+        st.markdown("### Oportunidades por estado")
         chart = (
             alt.Chart(chart_df)
-            .mark_bar(cornerRadiusTopLeft=6, cornerRadiusTopRight=6, size=48)
+            .mark_bar(cornerRadiusTopLeft=8, cornerRadiusTopRight=8, size=64)
             .encode(
                 x=alt.X("Estado:N", title=None, sort=None),
                 y=alt.Y("Cantidad:Q", title=None),
                 color=alt.Color("Estado:N", scale=color_scale, legend=None),
                 tooltip=["Estado", "Cantidad"],
             )
-            .properties(height=240)
+            .properties(height=340)
         )
         st.altair_chart(chart, width="stretch")
     with col_summary:
-        st.markdown("##### Resumen")
+        st.markdown("### Resumen")
+        st.write("")
         for s in status_order:
             if counts[s] > 0:
-                st.write(f"**{opportunity_status_label(s)}:** {counts[s]}")
+                st.metric(opportunity_status_label(s), counts[s])
 
 st.divider()
 
@@ -105,7 +106,7 @@ links = [
     ("views/configuracion.py", "⚙️", "Configuración", "umbrales de rentabilidad"),
 ]
 for col, (page, icon, name, desc) in zip(link_cols, links, strict=True):
-    with col, st.container(border=True):
+    with col, st.container(border=True, height=140):
         st.page_link(page, label=f"**{icon} {name}**", width="stretch")
         st.caption(desc)
 
