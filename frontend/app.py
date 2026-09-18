@@ -17,7 +17,7 @@ import streamlit as st
 from auth_gate import require_password
 from components.metrics import render_dashboard_metrics
 from i18n import opportunity_status_label
-from theme import OPPORTUNITY_STATUS_COLORS, inject_base_styles
+from theme import inject_base_styles, opportunity_status_palette
 
 st.set_page_config(page_title="Panel de Arbitraje", page_icon="📦", layout="wide")
 
@@ -74,9 +74,10 @@ if opportunities:
             if counts[s] > 0
         ]
     )
+    palette = opportunity_status_palette()
     color_scale = alt.Scale(
         domain=[opportunity_status_label(s) for s in status_order],
-        range=[OPPORTUNITY_STATUS_COLORS[s][1] for s in status_order],
+        range=[palette[s][1] for s in status_order],
     )
 
     col_chart, col_summary = st.columns([2, 1])
