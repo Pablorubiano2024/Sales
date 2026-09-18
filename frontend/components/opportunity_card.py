@@ -60,9 +60,8 @@ def render_opportunity_detail(opportunity: dict, product: dict | None) -> None:
         st.caption("Todavía no hay análisis de IA.")
 
     st.divider()
-    b1, b2, b3, b4 = st.columns(4)
 
-    if b1.button("Analizar con Claude", key=f"analyze-{opportunity['id']}"):
+    if st.button("🤖 Analizar con Claude", key=f"analyze-{opportunity['id']}", width="stretch"):
         try:
             with st.spinner("Consultando a Claude..."):
                 api_client.analyze_opportunity(
@@ -77,32 +76,34 @@ def render_opportunity_detail(opportunity: dict, product: dict | None) -> None:
     # marketplace son marcadores de posición. El estado hoy lo decide el
     # motor determinista de oportunidades + el enriquecimiento con IA, no
     # una anulación manual — un endpoint de anulación manual es el siguiente
-    # paso natural (ver PROJECT_CONTEXT.md).
-    b2.button(
-        "Marcar como revisada",
-        key=f"review-{opportunity['id']}",
-        disabled=True,
-        help="Aún no implementado: requiere un endpoint de anulación manual en la API.",
-    )
-    b3.button(
-        "Aprobar",
-        key=f"approve-{opportunity['id']}",
-        disabled=True,
-        help="Aún no implementado: requiere un endpoint de anulación manual en la API.",
-    )
-    b4.button(
-        "Rechazar",
-        key=f"reject-{opportunity['id']}",
-        disabled=True,
-        help="Aún no implementado: requiere un endpoint de anulación manual en la API.",
-    )
-
-    st.button(
-        "Publicar en MercadoLibre",
-        key=f"publish-{opportunity['id']}",
-        disabled=True,
-        help=(
-            "No implementado: la integración con MercadoLibre requiere "
-            "credenciales de API verificadas."
-        ),
-    )
+    # paso natural (ver PROJECT_CONTEXT.md). Agrupadas en un expander
+    # colapsado para no llenar la pantalla de botones que no hacen nada.
+    with st.expander("Más acciones (próximamente)", expanded=False):
+        b2, b3, b4, b5 = st.columns(4)
+        b2.button(
+            "Marcar como revisada",
+            key=f"review-{opportunity['id']}",
+            disabled=True,
+            help="Aún no implementado: requiere un endpoint de anulación manual en la API.",
+        )
+        b3.button(
+            "Aprobar",
+            key=f"approve-{opportunity['id']}",
+            disabled=True,
+            help="Aún no implementado: requiere un endpoint de anulación manual en la API.",
+        )
+        b4.button(
+            "Rechazar",
+            key=f"reject-{opportunity['id']}",
+            disabled=True,
+            help="Aún no implementado: requiere un endpoint de anulación manual en la API.",
+        )
+        b5.button(
+            "Publicar en MercadoLibre",
+            key=f"publish-{opportunity['id']}",
+            disabled=True,
+            help=(
+                "No implementado: la integración con MercadoLibre requiere "
+                "credenciales de API verificadas."
+            ),
+        )

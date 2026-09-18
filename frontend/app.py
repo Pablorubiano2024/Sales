@@ -106,18 +106,16 @@ st.divider()
 st.subheader("Para empezar")
 link_cols = st.columns(5)
 links = [
-    ("📈", "Oportunidades", "revisar, filtrar y analizar"),
-    ("🛒", "Productos", "explorar el catálogo"),
-    ("📦", "Órdenes", "seguimiento de compras al proveedor"),
-    ("🏪", "Marketplaces", "canales de venta configurados"),
-    ("⚙️", "Configuración", "umbrales de rentabilidad"),
+    ("pages/Oportunidades.py", "📈", "Oportunidades", "revisar, filtrar y analizar"),
+    ("pages/Productos.py", "🛒", "Productos", "explorar el catálogo"),
+    ("pages/Órdenes.py", "📦", "Órdenes", "seguimiento de compras al proveedor"),
+    ("pages/Marketplaces.py", "🏪", "Marketplaces", "canales de venta configurados"),
+    ("pages/Configuración.py", "⚙️", "Configuración", "umbrales de rentabilidad"),
 ]
-for col, (icon, name, desc) in zip(link_cols, links, strict=True):
-    with col:
-        with st.container(border=True):
-            st.markdown(f"### {icon}")
-            st.markdown(f"**{name}**")
-            st.caption(desc)
+for col, (page, icon, name, desc) in zip(link_cols, links, strict=True):
+    with col, st.container(border=True):
+        st.page_link(page, label=f"**{icon} {name}**", width="stretch")
+        st.caption(desc)
 
 if not marketplaces:
     st.info(
