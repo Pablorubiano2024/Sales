@@ -110,9 +110,27 @@ def inject_base_styles() -> None:
         }
 
         .block-container {
-            padding-top: 2.5rem;
+            padding-top: 3.2rem;
             padding-bottom: 3rem;
             max-width: 1400px;
+        }
+
+        /* Top navigation (st.navigation(position="top")): centered instead of
+        left-aligned, and a bit larger. The nav row's outer flex container
+        (space-between: nav vs. the Deploy/menu button) must stay as-is —
+        centering happens one level in, on the inner `.rc-overflow` flex
+        container that actually holds the nav links. */
+        [data-testid="stToolbar"] .rc-overflow {
+            justify-content: center !important;
+        }
+
+        [data-testid="stTopNavLink"] {
+            font-size: 1.05rem !important;
+            padding: 6px 18px !important;
+        }
+
+        [data-testid="stHeader"], [data-testid="stToolbar"] {
+            height: 68px !important;
         }
 
         [data-testid="stSidebar"] {
