@@ -41,7 +41,22 @@ from backend.app.models.source import Source, SourceType  # noqa: E402
 
 logger = get_logger(__name__)
 
-QUERIES = ["wireless earbuds", "phone case", "smart watch"]
+QUERIES = [
+    "wireless earbuds",
+    "phone case",
+    "smart watch",
+    # Higher-ticket categories: the fixed shipping estimate
+    # (Settings.shipping_cost_cop) eats a much smaller share of a
+    # $150,000+ COP sale than a $3,000 phone case, so these are more
+    # likely to survive real cost accounting — see PROJECT_CONTEXT.md,
+    # 2026-09-18 findings.
+    "mini projector",
+    "action camera",
+    "bluetooth speaker",
+    "gaming keyboard",
+    "camera gimbal stabilizer",
+    "portable monitor",
+]
 
 
 def main() -> None:
