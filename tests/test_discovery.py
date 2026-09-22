@@ -15,6 +15,7 @@ from backend.app.jobs import discovery as discovery_module
 from backend.app.jobs.discovery import run_discovery
 from backend.app.models.marketplace import Marketplace
 from backend.app.models.opportunity import Opportunity
+from backend.app.models.product import Product
 from backend.app.models.source import Source, SourceType
 
 
@@ -48,7 +49,10 @@ class _FakeUsdAdapter(SourceAdapter):
 
 @pytest.fixture()
 def _fixed_rate_settings(monkeypatch: pytest.MonkeyPatch) -> Settings:
-    settings = Settings(usd_to_cop_rate=Decimal("4000"))
+    # min_buy_price_cop=0 so these tests exercise currency/fee/shipping
+    # logic on a small $10 USD item without also tripping the (separately
+    # tested) cheap-item skip filter.
+    settings = Settings(usd_to_cop_rate=Decimal("4000"), min_buy_price_cop=Decimal("0"))
     monkeypatch.setattr(discovery_module, "get_settings", lambda: settings)
     return settings
 
@@ -108,3 +112,27 @@ def test_marketplace_fee_and_shipping_are_deducted(
         - opportunity.marketplace_fee
         - opportunity.shipping_cost
     )
+
+
+def test_cheap_candidate_below_min_buy_price_is_skipped(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = Settings(usd_to_cop_rate=Decimal("4000"), min_buy_price_cop=Decimal("250000"))
+    monkeypatch.setattr(discovery_module, "get_settings", lambda: settings)
+
+    source = Source(name="Fake USD Source", source_type=SourceType.API)
+    marketplace = Marketplace(name="Test Marketplace")
+    db_session.add_all([source, marketplace])
+    db_session.commit()
+    db_session.refresh(source)
+    db_session.refresh(marketplace)
+
+    # $10 USD * 4000 = 40,000 COP, well under the 250,000 COP floor.
+    opportunity_ids = run_discovery(
+        db_session, source, _FakeUsdAdapter(), marketplace.id, queries=["earbuds"]
+    )
+
+    assert opportunity_ids == []
+    assert db_session.query(Opportunity).count() == 0
+    # The catalog row is still kept even though no Opportunity was created.
+    assert db_session.query(Product).filter_by(name="Wireless Earbuds").count() == 1

@@ -101,6 +101,17 @@ class Settings(BaseSettings):
     # and see the freight calculator for a specific product before trusting
     # this on anything price-sensitive.
     shipping_cost_cop: Decimal = Decimal("70700")
+    # A fixed shipping cost hits cheap items hardest (it's a huge % of a
+    # small sale) — verified live 2026-09-21 against real CJ discovery:
+    # with real shipping/commission, 10 of 12 previously-"promising"
+    # opportunities flipped to rejected, and the 2 survivors were both
+    # $300,000+ COP buy price. Below this, the fixed shipping_cost_cop
+    # alone is already >25% of the purchase price, so it's very unlikely
+    # to clear min_roi even before commission. Discovery skips creating an
+    # Opportunity for candidates below this (the Product/SourceProduct
+    # catalog rows are still kept) — it's a noise filter, not a business
+    # rule, so a source with cheaper real shipping can lower it.
+    min_buy_price_cop: Decimal = Decimal("250000")
 
     @property
     def sqlalchemy_database_url(self) -> str:

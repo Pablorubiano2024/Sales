@@ -97,6 +97,21 @@ def run_discovery(
             # CJdropshipping, in USD) has to be converted here, before the
             # (currency-agnostic) pricing engine ever sees it.
             buy_price_cop = convert_to_cop(candidate.price, candidate.currency, settings)
+
+            # Cheap items are structurally very unlikely to clear min_roi
+            # once real shipping is subtracted (Settings.shipping_cost_cop
+            # is a fixed cost, so it dominates a small sale) — skip
+            # evaluating one instead of creating a doomed Opportunity.
+            # See Settings.min_buy_price_cop.
+            if buy_price_cop < settings.min_buy_price_cop:
+                logger.info(
+                    "Skipping %s: buy_price=%s COP below min_buy_price_cop=%s",
+                    candidate.name,
+                    buy_price_cop,
+                    settings.min_buy_price_cop,
+                )
+                continue
+
             estimated_sell_price = (buy_price_cop * estimated_sell_price_multiplier).quantize(
                 Decimal("0.01")
             )
