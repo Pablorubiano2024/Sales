@@ -8,3 +8,14 @@ textColor = "#F1F5F9"
 
 [browser]
 gatherUsageStats = false
+
+[server]
+# Streamlit's local file watcher (watchdog/inotify) is for hot-reload
+# during development — pointless in production, since deploys here happen
+# via git push + Streamlit Cloud's own "pull code changes" mechanism, not
+# by editing files on the running container. Left on, it repeatedly hit
+# "OSError: [Errno 24] inotify instance limit reached" on Streamlit
+# Community Cloud's container (observed live 2026-09-22, recurring every
+# ~30 min over several hours) until a redeploy reset it. "none" avoids the
+# OS-level inotify limit entirely instead of just working around it.
+fileWatcherType = "none"
