@@ -17,8 +17,14 @@ logger = get_logger(__name__)
 
 
 def evaluate_opportunity(db: Session, inputs: OpportunityCreate) -> Opportunity:
-    """Compute profitability for the given inputs, classify it, and
-    persist it as a new Opportunity row."""
+    """Compute profitability for the given inputs, classify it, and persist
+    it — updates the existing Opportunity for this (product, source,
+    marketplace) combo if one already exists, instead of inserting a
+    duplicate. Discovery re-runs the same product through this on every
+    call (e.g. the same item matched by two search queries, or a daily
+    re-discovery pass), so without this a product accumulates one
+    Opportunity row per run — confirmed live 2026-09-22 as duplicate
+    "approved" rows for the same product with conflicting prices."""
     breakdown = calculate_profit_breakdown(
         buy_price=inputs.buy_price,
         sell_price=inputs.sell_price,
@@ -30,24 +36,35 @@ def evaluate_opportunity(db: Session, inputs: OpportunityCreate) -> Opportunity:
     )
     status = classify_opportunity(breakdown, risk_score=None)
 
-    opportunity = Opportunity(
-        product_id=inputs.product_id,
-        source_id=inputs.source_id,
-        marketplace_id=inputs.marketplace_id,
-        buy_price=breakdown.buy_price,
-        sell_price=breakdown.sell_price,
-        marketplace_fee=breakdown.marketplace_fee,
-        shipping_cost=breakdown.shipping_cost,
-        tax_cost=breakdown.tax_cost,
-        payment_cost=breakdown.payment_cost,
-        other_cost=breakdown.other_cost,
-        gross_profit=breakdown.gross_profit,
-        net_profit=breakdown.net_profit,
-        roi=breakdown.roi,
-        margin=breakdown.margin,
-        status=status,
+    opportunity = (
+        db.query(Opportunity)
+        .filter_by(
+            product_id=inputs.product_id,
+            source_id=inputs.source_id,
+            marketplace_id=inputs.marketplace_id,
+        )
+        .first()
     )
-    db.add(opportunity)
+    if opportunity is None:
+        opportunity = Opportunity(
+            product_id=inputs.product_id,
+            source_id=inputs.source_id,
+            marketplace_id=inputs.marketplace_id,
+        )
+        db.add(opportunity)
+
+    opportunity.buy_price = breakdown.buy_price
+    opportunity.sell_price = breakdown.sell_price
+    opportunity.marketplace_fee = breakdown.marketplace_fee
+    opportunity.shipping_cost = breakdown.shipping_cost
+    opportunity.tax_cost = breakdown.tax_cost
+    opportunity.payment_cost = breakdown.payment_cost
+    opportunity.other_cost = breakdown.other_cost
+    opportunity.gross_profit = breakdown.gross_profit
+    opportunity.net_profit = breakdown.net_profit
+    opportunity.roi = breakdown.roi
+    opportunity.margin = breakdown.margin
+    opportunity.status = status
     db.commit()
     db.refresh(opportunity)
 

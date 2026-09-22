@@ -226,3 +226,32 @@ def test_update_listing_puts_fields_and_returns_updated_item(
         result = adapter.update_listing("MCO123456789", status="paused")
 
     assert result.status == "paused"
+
+
+def test_update_price_sends_a_bare_integer_for_a_whole_cop_amount(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """COP rejects any decimal precision (confirmed live 2026-09-21, same
+    constraint create_listing already handles) — update_price must send an
+    int for a whole-number Decimal, not 75000.0."""
+    monkeypatch.setattr(ml_module, "get_settings", lambda: FAKE_SETTINGS)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.read())
+        assert payload == {"price": 75000}
+        assert isinstance(payload["price"], int)
+        return httpx.Response(
+            200,
+            json={
+                "id": "MCO123456789",
+                "title": "whatever",
+                "price": 75000,
+                "currency_id": "COP",
+                "status": "active",
+            },
+        )
+
+    with MercadoLibreAdapter(db_session, transport=httpx.MockTransport(handler)) as adapter:
+        adapter._authenticated = True  # noqa: SLF001
+        adapter._access_token = "tok"  # noqa: SLF001
+        adapter.update_price("MCO123456789", Decimal("75000"))

@@ -30,6 +30,13 @@ def render_opportunity_detail(opportunity: dict, product: dict | None) -> None:
     col2.metric("ROI", f"{opportunity['roi']:.1%}")
     col3.metric("Margen", f"{opportunity['margin']:.1%}")
 
+    if opportunity.get("source_url"):
+        st.link_button(
+            "🛒 Comprar en la fuente",
+            opportunity["source_url"],
+            help="Ábrelo en cuanto haya una venta en MercadoLibre.",
+        )
+
     st.info(
         "💡 El **precio de venta** usado aquí es una estimación (multiplicador sobre el "
         "precio de compra) — todavía no viene de una búsqueda real en MercadoLibre. Antes "

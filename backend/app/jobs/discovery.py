@@ -17,9 +17,9 @@ from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
-from backend.app.core.config import get_settings
+from backend.app.core.config import Settings, get_settings
 from backend.app.core.logging import get_logger
-from backend.app.integrations.base import SourceAdapter
+from backend.app.integrations.base import SourceAdapter, SourceProductInfo
 from backend.app.models.product import Product
 from backend.app.models.source import Source, SourceProduct
 from backend.app.schemas.opportunity import OpportunityCreate
@@ -28,6 +28,50 @@ from backend.app.services.currency import convert_to_cop
 from backend.app.services.product_matcher import find_best_match
 
 logger = get_logger(__name__)
+
+
+def build_opportunity_inputs(
+    candidate: SourceProductInfo,
+    product_id: str,
+    source_id: str,
+    marketplace_id: str,
+    settings: Settings,
+    shipping_cost_cop: Decimal,
+    min_buy_price_cop: Decimal,
+    estimated_sell_price_multiplier: Decimal = Decimal("1.8"),
+) -> OpportunityCreate | None:
+    """Convert a live `SourceProductInfo` into the inputs `evaluate_opportunity`
+    needs — the same buy/sell/fee math `run_discovery` uses for a fresh
+    search result, factored out so `sync_marketplace_listings.py` can
+    recompute an already-published listing's opportunity identically
+    instead of duplicating this logic. Returns None when the buy price
+    doesn't clear `min_buy_price_cop` (see run_discovery's docstring)."""
+    buy_price_cop = convert_to_cop(candidate.price, candidate.currency, settings)
+    if buy_price_cop < min_buy_price_cop:
+        return None
+
+    if candidate.reference_price is not None:
+        estimated_sell_price = convert_to_cop(
+            candidate.reference_price, candidate.currency, settings
+        )
+    else:
+        estimated_sell_price = (buy_price_cop * estimated_sell_price_multiplier).quantize(
+            Decimal("0.01")
+        )
+
+    marketplace_fee = (estimated_sell_price * settings.marketplace_commission_pct).quantize(
+        Decimal("0.01")
+    )
+
+    return OpportunityCreate(
+        product_id=product_id,
+        source_id=source_id,
+        marketplace_id=marketplace_id,
+        buy_price=float(buy_price_cop),
+        sell_price=float(estimated_sell_price),
+        marketplace_fee=float(marketplace_fee),
+        shipping_cost=float(shipping_cost_cop),
+    )
 
 
 def run_discovery(
@@ -110,62 +154,30 @@ def run_discovery(
 
             # Opportunities and thresholds (min_roi, min_net_profit) are all
             # COP-denominated — a source quoting in another currency (e.g.
-            # CJdropshipping, in USD) has to be converted here, before the
-            # (currency-agnostic) pricing engine ever sees it.
-            buy_price_cop = convert_to_cop(candidate.price, candidate.currency, settings)
-
-            # Cheap items are structurally very unlikely to clear min_roi
-            # once real shipping is subtracted (a fixed shipping cost
-            # dominates a small sale) — skip evaluating one instead of
-            # creating a doomed Opportunity.
-            if buy_price_cop < min_buy_price_cop:
+            # CJdropshipping, in USD) has to be converted before the
+            # (currency-agnostic) pricing engine ever sees it; cheap items
+            # are also structurally unlikely to clear min_roi once real
+            # shipping is subtracted, so they're skipped rather than
+            # evaluated into a doomed Opportunity. See build_opportunity_inputs.
+            inputs = build_opportunity_inputs(
+                candidate,
+                product.id,
+                source.id,
+                marketplace_id,
+                settings,
+                shipping_cost_cop,
+                min_buy_price_cop,
+                estimated_sell_price_multiplier,
+            )
+            if inputs is None:
                 logger.info(
-                    "Skipping %s: buy_price=%s COP below min_buy_price_cop=%s",
+                    "Skipping %s: buy_price below min_buy_price_cop=%s",
                     candidate.name,
-                    buy_price_cop,
                     min_buy_price_cop,
                 )
                 continue
 
-            # A source's own real reference/list price (e.g. a retailer's
-            # crossed-out "normal price" next to a discounted one) is real
-            # market data and must win over the multiplier heuristic —
-            # applying a wholesale-arbitrage markup on top of an
-            # already-retail price wildly overstates the resale price (see
-            # PROJECT_CONTEXT.md, 2026-09-22 Falabella finding). Sources
-            # with no such concept (e.g. CJdropshipping) leave this unset,
-            # falling back to the multiplier.
-            if candidate.reference_price is not None:
-                estimated_sell_price = convert_to_cop(
-                    candidate.reference_price, candidate.currency, settings
-                )
-            else:
-                estimated_sell_price = (buy_price_cop * estimated_sell_price_multiplier).quantize(
-                    Decimal("0.01")
-                )
-
-            # The marketplace takes a real cut and shipping is a real cost —
-            # omitting them (as this job did until 2026-09-18) makes
-            # "net_profit" actually gross margin, overstating every
-            # opportunity. Both are single configurable estimates rather
-            # than a precise per-product/per-category lookup — see
-            # Settings.marketplace_commission_pct / shipping_cost_cop.
-            marketplace_fee = (estimated_sell_price * settings.marketplace_commission_pct).quantize(
-                Decimal("0.01")
-            )
-
-            opportunity = evaluate_opportunity(
-                db,
-                OpportunityCreate(
-                    product_id=product.id,
-                    source_id=source.id,
-                    marketplace_id=marketplace_id,
-                    buy_price=float(buy_price_cop),
-                    sell_price=float(estimated_sell_price),
-                    marketplace_fee=float(marketplace_fee),
-                    shipping_cost=float(shipping_cost_cop),
-                ),
-            )
+            opportunity = evaluate_opportunity(db, inputs)
             created_opportunity_ids.append(opportunity.id)
 
     return created_opportunity_ids

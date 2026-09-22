@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from backend.app.core.config import Settings
 from backend.app.models.marketplace import Marketplace
-from backend.app.models.opportunity import OpportunityStatus
+from backend.app.models.opportunity import Opportunity, OpportunityStatus
 from backend.app.models.product import Product
 from backend.app.models.source import Source, SourceType
 from backend.app.schemas.opportunity import OpportunityCreate
@@ -104,3 +104,45 @@ def test_evaluate_opportunity_persists_deterministic_result(db_session: Session)
     assert opportunity.id is not None
     assert float(opportunity.net_profit) == 52000.0
     assert opportunity.status == OpportunityStatus.APPROVED
+
+
+def test_evaluate_opportunity_updates_existing_row_instead_of_duplicating(
+    db_session: Session,
+) -> None:
+    """Re-running discovery for the same product/source/marketplace (e.g.
+    matched by two queries, or a daily re-run) must update the one
+    Opportunity row, not create a second one with a stale price."""
+    product, source, marketplace = _make_product_source_marketplace(db_session)
+    inputs = dict(product_id=product.id, source_id=source.id, marketplace_id=marketplace.id)
+
+    first = evaluate_opportunity(
+        db_session,
+        OpportunityCreate(
+            **inputs,
+            buy_price=45000,
+            sell_price=120000,
+            marketplace_fee=12000,
+            shipping_cost=8000,
+            payment_cost=3000,
+        ),
+    )
+    second = evaluate_opportunity(
+        db_session,
+        OpportunityCreate(
+            **inputs,
+            buy_price=50000,
+            sell_price=130000,
+            marketplace_fee=13000,
+            shipping_cost=8000,
+            payment_cost=3000,
+        ),
+    )
+
+    assert second.id == first.id
+    assert (
+        db_session.query(Opportunity)
+        .filter_by(product_id=product.id, source_id=source.id, marketplace_id=marketplace.id)
+        .count()
+        == 1
+    )
+    assert float(second.buy_price) == 50000.0

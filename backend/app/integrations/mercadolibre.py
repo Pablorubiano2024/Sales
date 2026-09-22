@@ -283,7 +283,12 @@ class MercadoLibreAdapter(MarketplaceAdapter):
         )
 
     def update_price(self, external_id: str, price: Decimal) -> None:
-        self.update_listing(external_id, price=float(price))
+        # Same COP-decimal-precision constraint as create_listing (see its
+        # docstring) — a whole-number Decimal must be sent as an int.
+        price_value: float | int = (
+            int(price) if price == price.to_integral_value() else float(price)
+        )
+        self.update_listing(external_id, price=price_value)
 
     def update_stock(self, external_id: str, in_stock: bool) -> None:
         # TODO: PUT /items/{item_id} with {"available_quantity": ...}

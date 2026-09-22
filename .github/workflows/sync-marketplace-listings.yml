@@ -1,0 +1,43 @@
+name: Sync MercadoLibre listings
+
+# Runs scripts/sync_marketplace_listings.py once a day: pauses any active
+# MercadoLibre listing whose source product went out of stock or was
+# reclassified below "promising", and pushes a real price change when the
+# source price moved. See that script's docstring for the full logic.
+#
+# Requires these repo secrets (Settings -> Secrets and variables ->
+# Actions): DATABASE_URL (Neon, the same one Render uses), ML_CLIENT_ID,
+# ML_CLIENT_SECRET, ML_REDIRECT_URI (the same MercadoLibre app credentials
+# Render uses — OAuth tokens are already stored in the DB from the initial
+# authorize flow; this job only needs the app's client id/secret to
+# refresh them).
+
+on:
+  schedule:
+    # 07:00 America/Bogota (UTC-5) daily.
+    - cron: "0 12 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Poetry
+        run: pipx install poetry
+
+      - name: Install dependencies
+        run: poetry install --no-root --only main
+
+      - name: Run daily sync
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ML_CLIENT_ID: ${{ secrets.ML_CLIENT_ID }}
+          ML_CLIENT_SECRET: ${{ secrets.ML_CLIENT_SECRET }}
+          ML_REDIRECT_URI: ${{ secrets.ML_REDIRECT_URI }}
+        run: poetry run python scripts/sync_marketplace_listings.py

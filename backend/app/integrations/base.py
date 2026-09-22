@@ -41,6 +41,12 @@ class SourceProductInfo:
     # PROJECT_CONTEXT.md's 2026-09-22 Falabella finding for why applying a
     # wholesale-arbitrage multiplier to an already-retail price is wrong.
     reference_price: Decimal | None = None
+    # Real product photo URLs reported by the source itself (not a stock/
+    # placeholder image). None or empty when the source has no usable
+    # photo — callers that need a picture (e.g. MercadoLibre's "free"
+    # listing type effectively requires one) must handle that case rather
+    # than assume it's always present.
+    image_urls: tuple[str, ...] = ()
 
 
 class SourceAdapter(ABC):

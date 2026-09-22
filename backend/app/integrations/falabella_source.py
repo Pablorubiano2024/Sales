@@ -105,6 +105,24 @@ def _best_price(prices: list[dict[str, Any]]) -> Decimal | None:
     return _parse_cop_price(values[0])
 
 
+# The top-level `productData.medias` field is frequently just a single
+# placeholder entry (id "default_no_image", a generic "NoImage" URL) — the
+# real photos live under the *current variant's* own `medias` field
+# instead. Confirmed live 2026-09-22 on a real product. Search results use
+# a different, simpler shape (`mediaUrls`: a plain list of URL strings).
+_PLACEHOLDER_MEDIA_ID = "default_no_image"
+
+
+def _image_urls_from_medias(medias: list[dict[str, Any]]) -> tuple[str, ...]:
+    """Extract real photo URLs from a detail-page `medias` list, dropping
+    the "no image" placeholder and anything that isn't an image."""
+    return tuple(
+        m["url"]
+        for m in medias
+        if m.get("mediaType") == "image" and m.get("id") != _PLACEHOLDER_MEDIA_ID and m.get("url")
+    )
+
+
 def _reference_price(prices: list[dict[str, Any]]) -> Decimal | None:
     """The crossed-out "normalPrice" (the real, non-discounted list price)
     — real market data, not a guess. None when there's no active discount
@@ -166,6 +184,7 @@ class FalabellaSourceAdapter(SourceAdapter):
             url=item.get("url"),
             raw=item,
             reference_price=_reference_price(prices),
+            image_urls=tuple(u for u in (item.get("mediaUrls") or []) if u),
         )
 
     def search_products(self, query: str, limit: int = 20) -> list[SourceProductInfo]:
@@ -204,20 +223,27 @@ class FalabellaSourceAdapter(SourceAdapter):
         if product is None:
             return None
 
+        variants = product.get("variants") or []
+        current = str(product.get("currentVariant", ""))
+        variant = next((v for v in variants if str(v.get("id")) == current), None)
+
         prices = product.get("prices") or []
         price = _best_price(prices)
         if price is None:
             # Top-level productData doesn't always carry prices; the active
             # variant's do (see module docstring — "variants").
-            variants = product.get("variants") or []
-            current = str(product.get("currentVariant", ""))
-            variant = next((v for v in variants if str(v.get("id")) == current), None)
             if variant is not None:
                 prices = variant.get("prices") or []
                 price = _best_price(prices)
         if price is None:
             logger.warning("Falabella get_product('%s'): unparseable/missing price", external_id)
             return None
+
+        image_urls = _image_urls_from_medias(product.get("medias") or [])
+        if not image_urls and variant is not None:
+            # Top-level `medias` is often just a "no image" placeholder —
+            # the real photos live on the active variant (see helper docstring).
+            image_urls = _image_urls_from_medias(variant.get("medias") or [])
 
         return SourceProductInfo(
             external_id=external_id,
@@ -228,6 +254,7 @@ class FalabellaSourceAdapter(SourceAdapter):
             stock_available=not product.get("isOutOfStock", False),
             url=str(response.url),
             raw=product,
+            image_urls=image_urls,
         )
 
     def get_price(self, external_id: str) -> Decimal | None:

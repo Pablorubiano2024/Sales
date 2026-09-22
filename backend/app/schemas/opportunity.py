@@ -58,6 +58,11 @@ class OpportunityRead(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+    # Not a column on Opportunity — populated by the endpoint from the
+    # matching SourceProduct row, so the UI can link straight to where to
+    # buy the item as soon as a MercadoLibre sale happens.
+    source_url: str | None = None
+
 
 class OpportunityAnalyzeRequest(BaseModel):
     """Request body for POST /api/opportunities/analyze.

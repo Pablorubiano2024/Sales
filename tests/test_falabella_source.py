@@ -23,6 +23,10 @@ SEARCH_RESULT = {
         {"type": "internetPrice", "crossed": False, "price": ["2.149.900"]},
         {"type": "normalPrice", "crossed": True, "price": ["4.099.900"]},
     ],
+    "mediaUrls": [
+        "https://media.falabella.com.co/falabellaCO/73568541_01/public",
+        "https://media.falabella.com.co/falabellaCO/73568541_02/public",
+    ],
 }
 
 
@@ -57,6 +61,10 @@ def test_search_products_parses_real_response_shape() -> None:
     # must be surfaced, not discarded, so discovery can use it instead of
     # a guessed wholesale-arbitrage markup.
     assert product.reference_price == Decimal("4099900")
+    assert product.image_urls == (
+        "https://media.falabella.com.co/falabellaCO/73568541_01/public",
+        "https://media.falabella.com.co/falabellaCO/73568541_02/public",
+    )
 
 
 def test_search_products_reference_price_is_none_without_a_real_discount() -> None:
@@ -166,6 +174,55 @@ def test_get_product_falls_back_to_current_variant_prices() -> None:
 
     assert product is not None
     assert product.price == Decimal("50000")
+
+
+def test_get_product_falls_back_to_variant_images_when_top_level_is_a_placeholder() -> None:
+    """The top-level `medias` is frequently just a "no image" placeholder —
+    real photos live on the active variant's own `medias` — confirmed live
+    2026-09-22 on a real product."""
+    product_data = {
+        "id": "137938699",
+        "name": "Licuadora Ninja Sistema Profesional de Cocina Inteligente 1700 W",
+        "isOutOfStock": False,
+        "currentVariant": "137938700",
+        "medias": [
+            {
+                "id": "default_no_image",
+                "url": "https://media.falabella.com/FalabellaPEAndCO/NoImage/public",
+                "mediaType": "image",
+            }
+        ],
+        "variants": [
+            {
+                "id": "137938700",
+                "prices": [{"type": "internetPrice", "price": ["1.199.900"]}],
+                "medias": [
+                    {
+                        "id": "real-1",
+                        "url": "https://media.falabella.com/falabellaCO/137938700_01/public",
+                        "mediaType": "image",
+                    },
+                    {
+                        "id": "real-2",
+                        "url": "https://media.falabella.com/falabellaCO/137938700_02/public",
+                        "mediaType": "image",
+                    },
+                ],
+            }
+        ],
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text=_html_with_next_data({"productData": product_data}))
+
+    adapter = _adapter(handler)
+    product = adapter.get_product("137938699")
+
+    assert product is not None
+    assert product.image_urls == (
+        "https://media.falabella.com/falabellaCO/137938700_01/public",
+        "https://media.falabella.com/falabellaCO/137938700_02/public",
+    )
 
 
 def test_get_product_marks_out_of_stock() -> None:
