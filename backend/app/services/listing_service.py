@@ -73,6 +73,28 @@ def publish_and_record(
     return record
 
 
+def refresh_listing_status(
+    db: Session, adapter: MercadoLibreAdapter, record: MarketplaceProduct
+) -> MarketplaceProduct:
+    """Re-fetch the item's real current status from MercadoLibre and
+    persist it. A freshly created item's status can be a transient value
+    (e.g. "paused" pending an async review) that resolves moments later —
+    confirmed live 2026-09-22, publishing 7 real items: the create
+    response reported "paused" for every one, but re-checking minutes
+    later showed a mix of active/under_review/genuinely-paused. Anything
+    that depends on the *current* state (the daily sync job only looks at
+    ACTIVE rows) must call this rather than trust create_listing's
+    snapshot forever."""
+    if record.external_id is None:
+        return record
+    listing = adapter.get_listing(record.external_id)
+    if listing is not None:
+        record.status = _to_listing_status(listing.status)
+        db.commit()
+        db.refresh(record)
+    return record
+
+
 def pause_listing(
     db: Session, adapter: MercadoLibreAdapter, record: MarketplaceProduct, reason: str
 ) -> None:

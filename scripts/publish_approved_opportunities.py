@@ -35,6 +35,7 @@ Usage:
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -54,6 +55,10 @@ logger = get_logger(__name__)
 
 MAX_TITLE_LENGTH = 60  # MercadoLibre item title limit.
 MAX_PICTURES = 6
+# Free-tier listing creation has a real per-account cooldown — confirmed
+# live 2026-09-22, see the retry loop below.
+RATE_LIMIT_BACKOFF_SECONDS = 30
+MAX_RATE_LIMIT_RETRIES = 3
 
 # Source name -> adapter factory. Only sources with a real, live adapter
 # can be safely mass-published — CJ's wholesale-arbitrage opportunities
@@ -150,27 +155,59 @@ def main() -> None:
 
                 title = _truncate_title(product.name)
                 pictures = list(live.image_urls[:MAX_PICTURES])
+
+                if not confirm:
+                    print(
+                        f"PUBLICARÍA  {label}\n"
+                        f"       categoria={category_id} precio={opp.sell_price} COP "
+                        f"fotos={len(pictures)}"
+                    )
+                    published += 1
+                    continue
+
+                # "listing_type.temporarily_unavailable" is a real cooldown
+                # between consecutive free-tier item creations, not a
+                # permanent failure — confirmed live 2026-09-22 (an attempt
+                # right after a previous success fails, one ~60s later on
+                # its own succeeds). Retry with backoff instead of treating
+                # it like any other error; any other real error still
+                # aborts just this item, not the whole batch.
+                record = None
+                for attempt in range(MAX_RATE_LIMIT_RETRIES + 1):
+                    try:
+                        record = listing_service.publish_and_record(
+                            db,
+                            ml_adapter,
+                            product.id,
+                            marketplace.id,
+                            title=title,
+                            price=opp.sell_price,
+                            currency="COP",
+                            category_id=category_id,
+                            brand=product.brand or "Genérica",
+                            pictures=pictures,
+                        )
+                        break
+                    except RuntimeError as exc:
+                        is_last = attempt == MAX_RATE_LIMIT_RETRIES
+                        if "listing_type.temporarily_unavailable" in str(exc) and not is_last:
+                            print(
+                                f"       cooldown, reintentando en {RATE_LIMIT_BACKOFF_SECONDS}s..."
+                            )
+                            time.sleep(RATE_LIMIT_BACKOFF_SECONDS)
+                            continue
+                        print(f"ERROR  {label}: {exc}")
+                        skipped += 1
+                        break
+                if record is None:
+                    continue
+
                 print(
-                    f"{'PUBLICAR' if confirm else 'PUBLICARÍA'}  {label}\n"
+                    f"PUBLICADA  {label}: {record.external_id} {record.url}\n"
                     f"       categoria={category_id} precio={opp.sell_price} COP "
                     f"fotos={len(pictures)}"
                 )
                 published += 1
-
-                if confirm:
-                    record = listing_service.publish_and_record(
-                        db,
-                        ml_adapter,
-                        product.id,
-                        marketplace.id,
-                        title=title,
-                        price=opp.sell_price,
-                        currency="COP",
-                        category_id=category_id,
-                        brand=product.brand or "Genérica",
-                        pictures=pictures,
-                    )
-                    print(f"       -> {record.external_id} {record.url}")
 
         print(
             f"\n{'Publicadas' if confirm else 'Se publicarían'}: {published}  Omitidas: {skipped}"

@@ -160,9 +160,36 @@ class MercadoLibreAdapter(MarketplaceAdapter):
         )
 
     def get_listing(self, external_id: str) -> MarketplaceListingInfo | None:
-        # TODO: GET /items/{item_id} (our own listing)
-        raise NotImplementedError(
-            "MercadoLibre get_listing: endpoint not yet verified against real responses."
+        """GET /items/{item_id}. Verified live 2026-09-22: a freshly
+        created item's status in the create_listing response can be a
+        transient value (e.g. "paused" pending an async review) that
+        resolves to "active"/"under_review"/etc. moments later — callers
+        that need the current real state (the daily sync job) must
+        re-fetch via this method rather than trust the creation-time
+        status forever."""
+        if not self._authenticated or self._access_token is None:
+            raise RuntimeError("Call authenticate() before get_listing().")
+
+        response = self._client.get(
+            f"/items/{external_id}", headers={"Authorization": f"Bearer {self._access_token}"}
+        )
+        if response.status_code == 404:
+            return None
+        if response.status_code != 200:
+            logger.error("MercadoLibre get_listing failed: %s", response.text)
+            raise RuntimeError(
+                f"MercadoLibre get_listing failed ({response.status_code}): {response.text}"
+            )
+
+        data = response.json()
+        return MarketplaceListingInfo(
+            external_id=data["id"],
+            title=data["title"],
+            price=Decimal(str(data["price"])),
+            currency=data["currency_id"],
+            status=data["status"],
+            url=data.get("permalink"),
+            raw=data,
         )
 
     def create_listing(

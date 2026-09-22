@@ -228,6 +228,50 @@ def test_update_listing_puts_fields_and_returns_updated_item(
     assert result.status == "paused"
 
 
+def test_get_listing_fetches_current_real_state(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A freshly created item's status can be a transient value that
+    resolves moments later (confirmed live 2026-09-22) — get_listing must
+    reflect whatever MercadoLibre reports right now, not a cached value."""
+    monkeypatch.setattr(ml_module, "get_settings", lambda: FAKE_SETTINGS)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert request.url.path == "/items/MCO123456789"
+        return httpx.Response(
+            200,
+            json={
+                "id": "MCO123456789",
+                "title": "whatever",
+                "price": 50000,
+                "currency_id": "COP",
+                "status": "active",
+                "permalink": "https://articulo.mercadolibre.com.co/MCO-123456789",
+            },
+        )
+
+    with MercadoLibreAdapter(db_session, transport=httpx.MockTransport(handler)) as adapter:
+        adapter._authenticated = True  # noqa: SLF001
+        adapter._access_token = "tok"  # noqa: SLF001
+        result = adapter.get_listing("MCO123456789")
+
+    assert result is not None
+    assert result.status == "active"
+
+
+def test_get_listing_returns_none_on_404(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(ml_module, "get_settings", lambda: FAKE_SETTINGS)
+    with MercadoLibreAdapter(
+        db_session, transport=httpx.MockTransport(lambda r: httpx.Response(404))
+    ) as adapter:
+        adapter._authenticated = True  # noqa: SLF001
+        adapter._access_token = "tok"  # noqa: SLF001
+        assert adapter.get_listing("does-not-exist") is None
+
+
 def test_update_price_sends_a_bare_integer_for_a_whole_cop_amount(
     db_session: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:

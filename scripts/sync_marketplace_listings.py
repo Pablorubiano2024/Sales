@@ -66,12 +66,31 @@ def main() -> None:
     db = SessionLocal()
     paused = updated = unchanged = skipped = 0
     try:
-        listings = db.query(MarketplaceProduct).filter_by(status=ListingStatus.ACTIVE).all()
-        print(f"{len(listings)} publicaciones activas a revisar.")
+        # Includes PAUSED, not just ACTIVE: a freshly created item's status
+        # can be a transient value (e.g. "paused" pending MercadoLibre's
+        # own async review) that resolves to "active" only moments later —
+        # confirmed live 2026-09-22. Reconciling every non-closed row's
+        # real status first means a listing published just before this
+        # runs doesn't sit invisible to the sync job forever; a row that's
+        # genuinely paused (by us, or by ML) is refreshed right back to
+        # "paused" and then skipped below, same as before.
+        candidates = (
+            db.query(MarketplaceProduct)
+            .filter(MarketplaceProduct.status.in_([ListingStatus.ACTIVE, ListingStatus.PAUSED]))
+            .all()
+        )
+        print(f"{len(candidates)} publicaciones activas/pausadas a revisar.")
 
         with MercadoLibreAdapter(db) as ml_adapter:
             if not ml_adapter.authenticate():
                 sys.exit("No hay una cuenta de MercadoLibre conectada/válida.")
+
+            listings = []
+            for candidate in candidates:
+                listing_service.refresh_listing_status(db, ml_adapter, candidate)
+                if candidate.status == ListingStatus.ACTIVE:
+                    listings.append(candidate)
+            print(f"{len(listings)} confirmadas activas tras refrescar su estado real.")
 
             for listing in listings:
                 product = listing.product
