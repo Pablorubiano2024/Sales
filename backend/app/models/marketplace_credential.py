@@ -9,16 +9,12 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, ForeignKey, String, Text
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.app.core.database import Base
 from backend.app.core.time import utcnow
-
-if TYPE_CHECKING:
-    from backend.app.models.marketplace import Marketplace
 
 
 def _uuid() -> str:
@@ -41,7 +37,12 @@ class MarketplaceCredential(Base):
     access_token: Mapped[str] = mapped_column(Text)
     refresh_token: Mapped[str] = mapped_column(Text)
     token_type: Mapped[str] = mapped_column(String(32), default="bearer")
-    scope: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Text, not String(255): a real granted scope is a space-separated list
+    # of long URN-style permission strings (e.g.
+    # "urn:ml:mktp:orders-shipments:/read-write ...") that comfortably
+    # exceeds 255 chars once more than one or two permissions are granted —
+    # confirmed live 2026-09-21 (psycopg.errors.StringDataRightTruncation).
+    scope: Mapped[str | None] = mapped_column(Text, nullable=True)
     # The remote account this credential authenticates as (MercadoLibre's
     # `user_id` from the token response) — useful to confirm we connected
     # the account we meant to.
@@ -50,8 +51,6 @@ class MarketplaceCredential(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
-
-    marketplace: Mapped[Marketplace] = relationship()
 
     def __repr__(self) -> str:  # pragma: no cover
         return (
