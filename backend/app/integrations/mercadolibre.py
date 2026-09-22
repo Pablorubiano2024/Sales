@@ -179,6 +179,7 @@ class MercadoLibreAdapter(MarketplaceAdapter):
         listing_type_id: str = "free",
         available_quantity: int = 1,
         pictures: list[str] | None = None,
+        extra_attributes: list[dict[str, str]] | None = None,
     ) -> MarketplaceListingInfo:
         """POST /items. Payload verified against MercadoLibre's own docs
         (developers.mercadolibre.com.ar/publica-productos, updated
@@ -224,6 +225,7 @@ class MercadoLibreAdapter(MarketplaceAdapter):
             "attributes": [
                 {"id": "BRAND", "value_name": brand},
                 {"id": "MODEL", "value_name": model},
+                *(extra_attributes or []),
             ],
         }
         if pictures:
