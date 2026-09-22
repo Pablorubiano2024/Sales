@@ -72,6 +72,37 @@ def test_search_products_reference_price_is_none_without_a_real_discount() -> No
     assert adapter.search_products("television")[0].reference_price is None
 
 
+def test_get_product_uses_event_price_when_no_internet_price() -> None:
+    """A limited-time promotion reports its live price as "eventPrice", not
+    "internetPrice" — confirmed live 2026-09-22 on a real product. Must not
+    depend on it happening to be listed first."""
+    product_data = {
+        "id": "137938699",
+        "name": "Licuadora Ninja Sistema Profesional de Cocina Inteligente 1700 W",
+        "isOutOfStock": False,
+        "currentVariant": "137938700",
+        "variants": [
+            {
+                "id": "137938700",
+                "prices": [
+                    {"type": "eventPrice", "crossed": False, "price": ["1.199.900"]},
+                    {"type": "normalPrice", "crossed": True, "price": ["3.199.900"]},
+                ],
+            }
+        ],
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text=_html_with_next_data({"productData": product_data}))
+
+    adapter = _adapter(handler)
+    product = adapter.get_product("137938699")
+
+    assert product is not None
+    assert product.price == Decimal("1199900")
+    assert product.reference_price == Decimal("3199900")
+
+
 def test_search_products_returns_empty_list_when_no_next_data() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, text="<html><body>not what we expect</body></html>")

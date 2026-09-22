@@ -73,10 +73,30 @@ def _parse_cop_price(raw: str) -> Decimal | None:
         return None
 
 
+# The "live, currently-payable" price entry can come under different
+# `type` labels depending on the product — "internetPrice" is the common
+# case, but a limited-time promotion instead reports "eventPrice" (has its
+# own `validity` date field) — confirmed live 2026-09-22 on a real product
+# ("Licuadora Ninja Sistema Profesional de Cocina Inteligente 1700 W").
+# Falling back to `prices[0]` when neither is present is a last resort,
+# not a real signal — it happened to work before only because the live
+# price was listed first, which isn't guaranteed.
+_LIVE_PRICE_TYPES = ("internetPrice", "eventPrice")
+
+
 def _best_price(prices: list[dict[str, Any]]) -> Decimal | None:
-    """Prefer the live "internetPrice" entry; fall back to whatever's first."""
+    """Prefer a known live-price type; fall back to whatever's first (with
+    a warning, since that's a positional guess, not a recognized type)."""
     by_type = {p.get("type"): p for p in prices}
-    entry = by_type.get("internetPrice") or (prices[0] if prices else None)
+    entry = next((by_type[t] for t in _LIVE_PRICE_TYPES if t in by_type), None)
+    if entry is None and prices:
+        entry = prices[0]
+        logger.warning(
+            "Falabella price has no recognized live-price type (%s) — "
+            "falling back to the first entry (%r), which may be wrong.",
+            [p.get("type") for p in prices],
+            entry.get("type"),
+        )
     if entry is None:
         return None
     values = entry.get("price") or []
