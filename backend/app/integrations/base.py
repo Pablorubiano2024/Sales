@@ -32,6 +32,15 @@ class SourceProductInfo:
     stock_available: bool
     url: str | None = None
     raw: dict[str, Any] | None = None
+    # A real reference/list price the source itself reports (e.g. a
+    # retailer's crossed-out "normal price" next to a discounted one) —
+    # None when the source has no such concept (e.g. a wholesale supplier
+    # like CJdropshipping, where `discovery.run_discovery` falls back to
+    # its estimated-multiplier heuristic instead). When present, this is
+    # real market data and should be preferred over a guessed markup — see
+    # PROJECT_CONTEXT.md's 2026-09-22 Falabella finding for why applying a
+    # wholesale-arbitrage multiplier to an already-retail price is wrong.
+    reference_price: Decimal | None = None
 
 
 class SourceAdapter(ABC):

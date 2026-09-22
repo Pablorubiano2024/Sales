@@ -188,6 +188,16 @@ discovery job converts them to COP (via `services/currency.py` and `USD_TO_COP_R
 evaluating against the COP-denominated thresholds, so opportunities now classify normally
 (rejected/promising/approved) instead of always coming back rejected.
 
+```bash
+poetry run python scripts/discover_falabella.py
+```
+
+The same pipeline against **falabella.com.co — a real Colombian retailer**, no API key needed
+(see `backend/app/integrations/falabella_source.py`). This is retail arbitrage, not wholesale
+dropshipping — different fulfillment model (you buy and ship yourself after a sale, domestically)
+and different estimated-sell-price logic (Falabella's own real "normal price" next to a discount,
+not a wholesale-markup multiplier). Requires no credentials; just needs the real site to be up.
+
 ## Running tests
 
 ```bash
@@ -263,6 +273,15 @@ poetry run mypy backend
   matches this project's business model closely (local Colombian suppliers, pay-on-delivery), but
   its `/integrations/login` endpoint errored on a regular dropshipper account during testing — it
   may be scoped to white-label partners only. See `PROJECT_CONTEXT.md` before touching this file.
+- **`falabella_source.py` is a real, working retail-arbitrage source** — falabella.com.co has no
+  official product API, but is a Next.js app that embeds structured product JSON directly in the
+  page (`__NEXT_DATA__`), verified scrapeable (permissive `robots.txt`). Structurally different
+  from CJ: retail (not wholesale) prices, domestic (not international) fulfillment, and no
+  supplier-ships-for-you flow — see `scripts/discover_falabella.py` for the domestic
+  shipping/price-floor overrides this needs. Uses the real "normal price" Falabella itself reports
+  next to a discount (`SourceProductInfo.reference_price`) as the estimated resale price, instead
+  of CJ's wholesale-markup multiplier — see Current Limitations below for why that distinction
+  matters.
 - `mock_source.py` is a clearly-fake, in-memory catalog for tests; `dummyjson_source.py` makes
   real HTTP calls but against a public demo API, not a real supplier.
 - **Currency conversion uses a manual, not live, FX rate.** `pricing_engine` itself stays
@@ -271,11 +290,14 @@ poetry run mypy backend
   `USD_TO_COP_RATE` setting rather than a live FX API call (rate drifts slowly enough that this is
   accurate enough for arbitrage decisions — see the module docstring for the reasoning). Update
   `USD_TO_COP_RATE` from the official TRM (banrep.gov.co) if it's drifted.
-- **No real marketplace sell-price data.** `run_discovery` estimates the selling price as a
-  configurable multiplier of the (converted) buy price — it does not look up what similar items
-  actually sell for on MercadoLibre (its public search API returned `403` as of this writing).
-  Validate a promising CJ-sourced opportunity's real MercadoLibre price manually before trusting
-  it for a real listing decision.
+- **No real marketplace (MercadoLibre) sell-price data — still true for CJ-sourced
+  opportunities.** For sources with no `reference_price` (CJ), `run_discovery` estimates the
+  selling price as a configurable multiplier of the (converted) buy price — it does not look up
+  what similar items actually sell for on MercadoLibre (its public search API returned `403` as
+  of this writing). Validate a promising CJ-sourced opportunity's real MercadoLibre price manually
+  before trusting it for a real listing decision. Falabella-sourced opportunities instead use
+  Falabella's own real "normal price" (`reference_price`) — real market data, but still not a
+  MercadoLibre price specifically.
 - **No scheduler.** `backend/app/jobs/discovery.py` and `price_monitor.py` are callable
   pipelines, not cron/queue-scheduled jobs yet.
 - **Order detection is manual.** There is no live marketplace webhook/poll creating `Order` rows

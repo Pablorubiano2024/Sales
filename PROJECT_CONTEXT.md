@@ -185,6 +185,28 @@ supplier → supplier ships directly to customer → profit tracked.
   auth is `{"apiKey": "CJUserNum@api@..."}` only — confirmed live (a bad key returns
   `{"code": 1600005, "message": "APIkey is wrong..."}`). The email/password version was wrong;
   trust the user's own account docs over search-engine-found mirrors when they conflict.
+- **Falabella (falabella.com.co) has no official product API for individual sellers, but is
+  genuinely scrapeable and now integrated** — `backend/app/integrations/falabella_source.py`.
+  Verified live 2026-09-22: `robots.txt` allows all crawlers except account/checkout paths; the
+  site is a Next.js app that embeds full structured product data (name, brand, prices, stock) as
+  JSON in a `<script id="__NEXT_DATA__">` tag on both search (`/falabella-co/search?Ntt=`) and
+  product (`/falabella-co/product/{id}`, slug optional) pages — a plain unauthenticated GET + JSON
+  parse, no headless browser needed. This is a **retail arbitrage** source, structurally different
+  from CJ's wholesale dropshipping: no supplier-ships-to-customer flow (buying/shipping is a
+  manual step after a sale, briefly holding the item), and domestic fulfillment (no international
+  freight) — `scripts/discover_falabella.py` overrides `run_discovery`'s CJ-tuned
+  `shipping_cost_cop`/`min_buy_price_cop` with much lower domestic estimates.
+- **The estimated-sell-price multiplier (1.8x) is wrong for a retail source like Falabella** —
+  found by actually running discovery against it (2026-09-22): applying a wholesale-arbitrage
+  markup on top of an already-retail price produced wildly overstated "opportunities" (e.g. a
+  $499,900 COP blender "resold" at $899,820 — 80% more than Falabella's own listed price, which
+  no real buyer would pay when the same product is available directly from Falabella for less).
+  Fixed by adding `SourceProductInfo.reference_price` (a source's own real reference/list price —
+  Falabella's crossed-out "normal price" next to a discounted one) — `run_discovery` now uses it
+  as `sell_price` directly when a source provides it, falling back to the multiplier only when it
+  doesn't (e.g. CJ, which has no such concept). Re-running discovery after the fix produced a
+  believable mix (18 approved / 25 promising / 57 rejected out of 100), not the earlier
+  near-100%-"promising" false positive.
 
 ## DEPLOYED STATE (as of 2026-09-17)
 

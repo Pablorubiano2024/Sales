@@ -47,6 +47,36 @@ class _FakeUsdAdapter(SourceAdapter):
         raise NotImplementedError
 
 
+class _FakeRetailAdapter(SourceAdapter):
+    """Returns one COP-priced product with a real reference/list price —
+    e.g. Falabella's crossed-out "normal price" next to a discounted one."""
+
+    def search_products(self, query: str, limit: int = 20) -> list[SourceProductInfo]:
+        return [
+            SourceProductInfo(
+                external_id="retail-1",
+                name="Discounted Blender",
+                price=Decimal("300000"),
+                currency="COP",
+                stock_available=True,
+                url="https://example.com/retail-1",
+                reference_price=Decimal("500000"),
+            )
+        ]
+
+    def get_product(self, external_id: str) -> SourceProductInfo | None:
+        raise NotImplementedError
+
+    def get_price(self, external_id: str) -> Decimal | None:
+        raise NotImplementedError
+
+    def get_stock(self, external_id: str) -> bool:
+        raise NotImplementedError
+
+    def get_product_url(self, external_id: str) -> str | None:
+        raise NotImplementedError
+
+
 @pytest.fixture()
 def _fixed_rate_settings(monkeypatch: pytest.MonkeyPatch) -> Settings:
     # min_buy_price_cop=0 so these tests exercise currency/fee/shipping
@@ -136,3 +166,31 @@ def test_cheap_candidate_below_min_buy_price_is_skipped(
     assert db_session.query(Opportunity).count() == 0
     # The catalog row is still kept even though no Opportunity was created.
     assert db_session.query(Product).filter_by(name="Wireless Earbuds").count() == 1
+
+
+def test_candidate_with_reference_price_uses_it_instead_of_the_multiplier(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A source's own real reference/list price (e.g. Falabella's
+    crossed-out "normal price") must be used as-is for sell_price, not
+    multiplied further — applying a wholesale-arbitrage markup on top of
+    an already-retail price wildly overstates it."""
+    settings = Settings(min_buy_price_cop=Decimal("0"))
+    monkeypatch.setattr(discovery_module, "get_settings", lambda: settings)
+
+    source = Source(name="Fake Retail Source", source_type=SourceType.SCRAPER)
+    marketplace = Marketplace(name="Test Marketplace")
+    db_session.add_all([source, marketplace])
+    db_session.commit()
+    db_session.refresh(source)
+    db_session.refresh(marketplace)
+
+    opportunity_ids = run_discovery(
+        db_session, source, _FakeRetailAdapter(), marketplace.id, queries=["blender"]
+    )
+
+    opportunity = db_session.get(Opportunity, opportunity_ids[0])
+    assert opportunity is not None
+    assert opportunity.buy_price == Decimal("300000.00")
+    # 500,000 (the real reference_price), not 300,000 * 1.8 = 540,000.
+    assert opportunity.sell_price == Decimal("500000.00")

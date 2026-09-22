@@ -37,15 +37,31 @@ def run_discovery(
     marketplace_id: str,
     queries: list[str],
     estimated_sell_price_multiplier: Decimal = Decimal("1.8"),
+    shipping_cost_cop: Decimal | None = None,
+    min_buy_price_cop: Decimal | None = None,
 ) -> list[str]:
     """Search the given source for each query, link/create Products and
     SourceProducts, and evaluate a naive opportunity for each against the
     given marketplace (using a configurable sell-price multiplier as a
     stand-in until real marketplace price discovery is implemented).
 
+    `shipping_cost_cop` / `min_buy_price_cop` default to the global
+    Settings values (tuned for CJdropshipping's international shipping)
+    when omitted — override them for a source with different real
+    fulfillment logistics (e.g. a domestic Colombian source like Falabella
+    doesn't pay ~$70,700 COP in international freight, so both the
+    per-order shipping cost and the "not worth evaluating below this"
+    floor should be much lower).
+
     Returns the list of created Opportunity ids.
     """
     settings = get_settings()
+    shipping_cost_cop = (
+        shipping_cost_cop if shipping_cost_cop is not None else settings.shipping_cost_cop
+    )
+    min_buy_price_cop = (
+        min_buy_price_cop if min_buy_price_cop is not None else settings.min_buy_price_cop
+    )
     catalog = db.query(Product).all()
     created_opportunity_ids: list[str] = []
 
@@ -99,22 +115,34 @@ def run_discovery(
             buy_price_cop = convert_to_cop(candidate.price, candidate.currency, settings)
 
             # Cheap items are structurally very unlikely to clear min_roi
-            # once real shipping is subtracted (Settings.shipping_cost_cop
-            # is a fixed cost, so it dominates a small sale) — skip
-            # evaluating one instead of creating a doomed Opportunity.
-            # See Settings.min_buy_price_cop.
-            if buy_price_cop < settings.min_buy_price_cop:
+            # once real shipping is subtracted (a fixed shipping cost
+            # dominates a small sale) — skip evaluating one instead of
+            # creating a doomed Opportunity.
+            if buy_price_cop < min_buy_price_cop:
                 logger.info(
                     "Skipping %s: buy_price=%s COP below min_buy_price_cop=%s",
                     candidate.name,
                     buy_price_cop,
-                    settings.min_buy_price_cop,
+                    min_buy_price_cop,
                 )
                 continue
 
-            estimated_sell_price = (buy_price_cop * estimated_sell_price_multiplier).quantize(
-                Decimal("0.01")
-            )
+            # A source's own real reference/list price (e.g. a retailer's
+            # crossed-out "normal price" next to a discounted one) is real
+            # market data and must win over the multiplier heuristic —
+            # applying a wholesale-arbitrage markup on top of an
+            # already-retail price wildly overstates the resale price (see
+            # PROJECT_CONTEXT.md, 2026-09-22 Falabella finding). Sources
+            # with no such concept (e.g. CJdropshipping) leave this unset,
+            # falling back to the multiplier.
+            if candidate.reference_price is not None:
+                estimated_sell_price = convert_to_cop(
+                    candidate.reference_price, candidate.currency, settings
+                )
+            else:
+                estimated_sell_price = (buy_price_cop * estimated_sell_price_multiplier).quantize(
+                    Decimal("0.01")
+                )
 
             # The marketplace takes a real cut and shipping is a real cost —
             # omitting them (as this job did until 2026-09-18) makes
@@ -135,7 +163,7 @@ def run_discovery(
                     buy_price=float(buy_price_cop),
                     sell_price=float(estimated_sell_price),
                     marketplace_fee=float(marketplace_fee),
-                    shipping_cost=float(settings.shipping_cost_cop),
+                    shipping_cost=float(shipping_cost_cop),
                 ),
             )
             created_opportunity_ids.append(opportunity.id)
