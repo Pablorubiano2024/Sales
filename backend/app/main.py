@@ -11,7 +11,15 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from backend.app.api import health, marketplaces, opportunities, orders, products, settings
+from backend.app.api import (
+    health,
+    marketplaces,
+    mercadolibre_oauth,
+    opportunities,
+    orders,
+    products,
+    settings,
+)
 from backend.app.core.config import get_settings
 from backend.app.core.database import init_db
 from backend.app.core.logging import configure_logging, get_logger
@@ -51,4 +59,5 @@ app.include_router(products.router)
 app.include_router(opportunities.router)
 app.include_router(orders.router)
 app.include_router(marketplaces.router)
+app.include_router(mercadolibre_oauth.router)
 app.include_router(settings.router)

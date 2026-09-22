@@ -50,6 +50,18 @@ class Settings(BaseSettings):
     # Not yet integrated for real — see backend/app/integrations/dropi.py.
     dropi_integration_key: str | None = None
 
+    # --- MercadoLibre (marketplace) ---
+    # Real OAuth2 app, registered at developers.mercadolibre.com.co/devcenter
+    # (the docs site's "Mis aplicaciones" link only works from there, not
+    # from the regular API-docs pages). See
+    # backend/app/integrations/mercadolibre.py and backend/app/api/
+    # mercadolibre_oauth.py for the flow.
+    ml_client_id: str | None = None
+    ml_client_secret: str | None = None
+    # Must exactly match one of the Redirect URIs registered for the app —
+    # no query string / variable parts allowed.
+    ml_redirect_uri: str | None = None
+
     # --- CJdropshipping (supplier) ---
     # Real, verified self-serve API (developers.cjdropshipping.com). Generate
     # the key from your CJ account: Apps -> install "API" -> Get API Key page.

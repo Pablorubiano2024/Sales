@@ -90,3 +90,7 @@ def get_orders(**params: Any) -> list[dict]:
 
 def get_marketplaces() -> list[dict]:
     return _request("GET", "/api/marketplaces")
+
+
+def get_mercadolibre_status() -> dict:
+    return _request("GET", "/api/marketplaces/mercadolibre/status")

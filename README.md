@@ -247,10 +247,13 @@ poetry run mypy backend
 
 ## Current limitations
 
-- **MercadoLibre is not integrated.** `backend/app/integrations/mercadolibre.py` is a skeleton
-  whose methods raise `NotImplementedError` with TODOs — it does not call any real endpoint.
-  Wiring it up requires a registered MercadoLibre application, OAuth credentials, and verified
-  endpoint documentation.
+- **MercadoLibre: OAuth is real, everything past login is still a skeleton.**
+  `ML_CLIENT_ID`/`ML_CLIENT_SECRET`/`ML_REDIRECT_URI` (from a real app registered at
+  developers.mercadolibre.com.co/devcenter) enable a genuine Authorization Code OAuth flow —
+  `/api/marketplaces/mercadolibre/authorize` and `/callback` (or the "Conectar cuenta de
+  MercadoLibre" button in the Marketplaces view), verified live against `/users/me`. But
+  `search_products`/`create_listing`/`update_price`/`get_orders` etc. all still raise
+  `NotImplementedError` — connecting the account doesn't yet let you publish or read anything.
 - **`cjdropshipping.py` is the only real, working supplier integration** — set `CJ_API_KEY` (from
   your own CJdropshipping account: Apps → install "API" → "Get API Key" page) to use it. It's a
   global (China-based) dropshipping supplier, not a Colombian one, so shipping times to Colombia
@@ -289,7 +292,7 @@ poetry run mypy backend
 2. **Product discovery** — real source adapters, scheduled discovery jobs.
 3. **Arbitrage engine refinement** — smarter product matching, richer cost modeling (taxes,
    payment processor fees per marketplace).
-4. **MercadoLibre integration** — OAuth, catalog/listing read, order polling.
+4. **MercadoLibre integration** — OAuth (done) → catalog/listing read, order polling.
 5. **Automated listings** — create/update/price-sync listings from approved opportunities.
 6. **Order monitoring** — webhook or polling-based order detection and alerting.
 7. **Semi-automated purchasing** — one-click or API-assisted supplier purchase once a sale lands.

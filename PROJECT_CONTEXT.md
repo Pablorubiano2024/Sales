@@ -47,10 +47,11 @@ supplier → supplier ships directly to customer → profit tracked.
 3. **Integrations must be modular.** `backend/app/integrations/base.py` defines
    `SourceAdapter` and `MarketplaceAdapter` interfaces. New sources/marketplaces implement these
    interfaces; the arbitrage engine and API never depend on a specific integration.
-4. **Never invent API endpoints.** `integrations/mercadolibre.py` is a skeleton: every method
-   either raises `NotImplementedError` with a TODO or clearly no-ops, because we do not have
-   verified MercadoLibre API documentation/credentials wired in yet. Do not fill in guessed
-   endpoint URLs or fabricate response shapes — confirm against official docs first.
+4. **Never invent API endpoints.** `integrations/mercadolibre.py`'s `authenticate()` is REAL
+   (OAuth2, verified 2026-09-21 — see VERIFIED FINDINGS below); every other method still raises
+   `NotImplementedError` with a TODO, because we don't have those endpoints' real request/response
+   shapes confirmed yet. Do not fill in guessed endpoint URLs or fabricate response shapes —
+   confirm against official docs first, the same way auth was done one endpoint at a time.
 5. **Never hard-code credentials.** All secrets/config come from environment variables via
    `backend/app/core/config.py` (`pydantic-settings`, reading `.env`). `.env` is git-ignored;
    only `.env.example` is committed (with blank/placeholder values).
@@ -106,6 +107,21 @@ supplier → supplier ships directly to customer → profit tracked.
 
 ## VERIFIED FINDINGS (so future agents don't re-research these)
 
+- **MercadoLibre's app registration console ("DevCenter") is a separate site from its API docs.**
+  `developers.mercadolibre.com.co` is documentation only ("API Docs") — creating/managing an app
+  happens at `developers.mercadolibre.com.co/devcenter`, reachable from the docs site's "Primeros
+  pasos" page via the "Ir a vincular mi cuenta" link. Confirmed live 2026-09-21: visiting
+  `/devcenter` the first time triggers a MercadoPago identity-verification gate
+  (`mercadopago.com.co/shield?id=USER_BLOCKER`) before granting access — expected, not a bug; the
+  account owner has to complete it themselves.
+- **MercadoLibre OAuth2 (Authorization Code, server-side) is real and implemented** — verified
+  against MercadoLibre's own docs (developers.mercadolibre.com.ar/es_ar/autenticacion-y-
+  autorizacion, updated 2026-07-15) on 2026-09-21. `/api/marketplaces/mercadolibre/authorize` +
+  `/callback` (backend/app/api/mercadolibre_oauth.py) run the flow and persist tokens on
+  `MarketplaceCredential`; `MercadoLibreAdapter.authenticate()` refreshes and verifies live
+  against `/users/me`. These two OAuth routes are deliberately NOT behind `require_api_key` —
+  they're hit by the seller's browser via redirect, which can't carry our internal API key.
+  Everything past auth (search/create/update listings, orders) is still `NotImplementedError`.
 - **MercadoLibre's public search endpoint is no longer open.** `GET
   https://api.mercadolibre.com/sites/{site_id}/search` — often cited in older tutorials as
   usable without auth — returned `403 forbidden` when tested live (2026-09-17), with and without
@@ -157,7 +173,8 @@ the service after idle time (cold start on first request); this is expected, not
   dashboard, Claude enrichment hook, adapter interfaces, mock source, seed data, tests.
 - **Phase 2 — Product discovery**: real source adapters, scheduled discovery jobs.
 - **Phase 3 — Arbitrage engine**: richer cost modeling, smarter product matching.
-- **Phase 4 — MercadoLibre integration**: real OAuth + verified endpoints.
+- **Phase 4 — MercadoLibre integration**: real OAuth (done, 2026-09-21) + verified endpoints
+  (search/create/update listings, orders — still pending, see `mercadolibre.py`).
 - **Phase 5 — Automated listings**: create/update listings from approved opportunities.
 - **Phase 6 — Order monitoring**: automatic order detection (webhook/polling) driving
   `order_service.create_order_from_opportunity`.
