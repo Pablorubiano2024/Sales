@@ -89,11 +89,18 @@ class Settings(BaseSettings):
     # is 8%-19% depending on category (up to 22% with extra installments) —
     # 15% here is a reasonable single default, not a per-category lookup.
     marketplace_commission_pct: Decimal = Decimal("0.15")
-    # Estimated, NOT verified per-product — CJdropshipping's real freight
-    # calculator (per product + destination) will differ. Covers
-    # CJ China->Colombia shipping plus the seller-subsidized portion of
-    # MercadoLibre's "envío gratis". Update if you have real freight data.
-    shipping_cost_cop: Decimal = Decimal("29000")
+    # Was a guess ($29,000) until verified live 2026-09-18 against CJ's real
+    # freight calculator (POST /api2.0/v1/logistic/freightCalculate,
+    # CN->CO) for an actual discovered product (770g projector): real
+    # options ranged from $20.56 USD/20-60 days (cheapest) to $105.82
+    # USD/3-7 days (DHL). $22.58 USD (~$70,700 COP at usd_to_cop_rate) for
+    # "CJPacket Latin America Sensitive" (6-12 days — the fastest option
+    # that isn't DHL-expensive) is a much more realistic single default
+    # than the old guess, though it's still one number standing in for a
+    # per-product/per-weight lookup. Update if you have a better estimate,
+    # and see the freight calculator for a specific product before trusting
+    # this on anything price-sensitive.
+    shipping_cost_cop: Decimal = Decimal("70700")
 
     @property
     def sqlalchemy_database_url(self) -> str:

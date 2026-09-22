@@ -197,3 +197,32 @@ def test_create_listing_posts_verified_payload_and_parses_response(
     assert result.external_id == "MCO123456789"
     assert result.status == "active"
     assert result.url == "https://articulo.mercadolibre.com.co/MCO-123456789"
+
+
+def test_update_listing_puts_fields_and_returns_updated_item(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(ml_module, "get_settings", lambda: FAKE_SETTINGS)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "PUT"
+        assert request.url.path == "/items/MCO123456789"
+        assert json.loads(request.read()) == {"status": "paused"}
+        return httpx.Response(
+            200,
+            json={
+                "id": "MCO123456789",
+                "title": "Item de Prueba - Por favor, NO OFERTAR",
+                "price": 5000,
+                "currency_id": "COP",
+                "status": "paused",
+                "permalink": "https://articulo.mercadolibre.com.co/MCO-123456789",
+            },
+        )
+
+    with MercadoLibreAdapter(db_session, transport=httpx.MockTransport(handler)) as adapter:
+        adapter._authenticated = True  # noqa: SLF001
+        adapter._access_token = "tok"  # noqa: SLF001
+        result = adapter.update_listing("MCO123456789", status="paused")
+
+    assert result.status == "paused"

@@ -121,7 +121,36 @@ supplier → supplier ships directly to customer → profit tracked.
   `MarketplaceCredential`; `MercadoLibreAdapter.authenticate()` refreshes and verifies live
   against `/users/me`. These two OAuth routes are deliberately NOT behind `require_api_key` —
   they're hit by the seller's browser via redirect, which can't carry our internal API key.
-  Everything past auth (search/create/update listings, orders) is still `NotImplementedError`.
+  `create_listing`/`update_listing`/`update_price` are also real now (verified 2026-09-21 by
+  actually publishing two live items — MCO4468282932, a throwaway "Item de Prueba" test listing
+  in category MCO412060 "Llaveros", and MCO4468548662, a real discovered opportunity, a portable
+  projector). `search_products`/`get_product`/`get_listing`/`get_orders` are still
+  `NotImplementedError`. Two real, non-obvious requirements found while publishing:
+  COP (and other zero-decimal currencies) reject a price with any decimal point at all
+  (`item.price.invalid`); and pictures are effectively mandatory in practice even for listing
+  types whose `GET /sites/{id}/listing_prices` response says `requires_picture: false` (e.g.
+  "bronze" silently normalizes to "gold_special" server-side, which does require one).
+- **A seller account needs a pickup/shipping address configured before it can list anything** —
+  `POST /items` returns `403 seller.unable_to_list` with `cause: ["address_pending"]` otherwise.
+  Not something this codebase can fix; the account owner has to add it via mercadolibre.com.co
+  ("Vender" flow surfaces the prompt directly).
+- **CJ's real China->Colombia shipping is far more expensive/slower than the old $29,000 COP
+  guess.** Verified live 2026-09-21 via CJ's real freight calculator (`POST /api2.0/v1/logistic/
+  freightCalculate`) for an actual discovered product (770g projector): options ranged from
+  $20.56 USD / 20-60 days (cheapest) to $105.82 USD / 3-7 days (DHL Official) — a 5x cost spread
+  tied directly to delivery speed. `Settings.shipping_cost_cop` default updated to ~$70,700 COP
+  (~$22.58 USD, "CJPacket Latin America Sensitive", 6-12 days) as a more realistic single
+  default — still not a per-product number; use the freight calculator for anything
+  price-sensitive. This also means MercadoLibre's own reputation system (fast dispatch/delivery
+  expectations under standard ME2) is in real tension with CJ's realistic delivery windows —
+  the cheap options are too slow for ME2's implicit SLA, the fast option (DHL) often costs more
+  than the entire item.
+- **MercadoLibre has a "Cross Border Trade" (CBT) program, already active in Colombia**, that
+  labels listings "compra internacional" so buyers expect longer delivery — this is likely the
+  *correct* mechanism for CJ-sourced dropshipping (avoids the ME2 fast-dispatch mismatch above),
+  but it's typically for accounts registered as actual foreign/cross-border merchants (Global
+  Selling), not something toggled on a normal Colombian seller account's regular listing.
+  Whether this account is eligible is unverified — investigate before relying on it.
 - **MercadoLibre's public search endpoint is no longer open.** `GET
   https://api.mercadolibre.com/sites/{site_id}/search` — often cited in older tutorials as
   usable without auth — returned `403 forbidden` when tested live (2026-09-17), with and without

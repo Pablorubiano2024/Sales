@@ -254,16 +254,36 @@ class MercadoLibreAdapter(MarketplaceAdapter):
         )
 
     def update_listing(self, external_id: str, **fields: Any) -> MarketplaceListingInfo:
-        # TODO: PUT /items/{item_id}
-        raise NotImplementedError(
-            "MercadoLibre update_listing: endpoint not yet verified against real responses."
+        """PUT /items/{item_id}. Verified live 2026-09-21 with {"status":
+        "paused"} — same endpoint accepts any updatable item field
+        (price, available_quantity, title while unsold, etc.), one call."""
+        if not self._authenticated or self._access_token is None:
+            raise RuntimeError("Call authenticate() before update_listing().")
+
+        response = self._client.put(
+            f"/items/{external_id}",
+            headers={"Authorization": f"Bearer {self._access_token}"},
+            json=fields,
+        )
+        if response.status_code != 200:
+            logger.error("MercadoLibre update_listing failed: %s", response.text)
+            raise RuntimeError(
+                f"MercadoLibre update_listing failed ({response.status_code}): {response.text}"
+            )
+
+        data = response.json()
+        return MarketplaceListingInfo(
+            external_id=data["id"],
+            title=data["title"],
+            price=Decimal(str(data["price"])),
+            currency=data["currency_id"],
+            status=data["status"],
+            url=data.get("permalink"),
+            raw=data,
         )
 
     def update_price(self, external_id: str, price: Decimal) -> None:
-        # TODO: PUT /items/{item_id} with {"price": ...}
-        raise NotImplementedError(
-            "MercadoLibre update_price: endpoint not yet verified against real responses."
-        )
+        self.update_listing(external_id, price=float(price))
 
     def update_stock(self, external_id: str, in_stock: bool) -> None:
         # TODO: PUT /items/{item_id} with {"available_quantity": ...}
