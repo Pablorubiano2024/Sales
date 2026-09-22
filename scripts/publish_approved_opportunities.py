@@ -19,7 +19,13 @@ For each APPROVED opportunity, in order:
      inventing data. See backend/app/services/category_lookup.py.
   4. Skip if there's no real product photo (MercadoLibre's "free" listing
      type effectively requires one — verified live 2026-09-21).
-  5. Publish via listing_service.publish_and_record(), which also records
+  5. Use the source's own real brand/model (e.g. Falabella's "SAMSUNG" /
+     "SM L320NZSALTA") instead of the "Genérica"/"Genérico" placeholder —
+     publishing a real branded product as generic hurt MercadoLibre's own
+     quality score, confirmed live 2026-09-22. Also maps any other real
+     spec (e.g. "Tipo de pantalla") onto a matching category attribute by
+     exact name, when one safely exists (category_lookup.match_specifications).
+  6. Publish via listing_service.publish_and_record(), which also records
      the MarketplaceProduct row the sync job depends on.
 
 DRY RUN BY DEFAULT — prints exactly what would happen (publish vs. skip +
@@ -71,6 +77,18 @@ SUPPORTED_SOURCES: dict[str, type[FalabellaSourceAdapter]] = {
 
 def _truncate_title(name: str) -> str:
     return name if len(name) <= MAX_TITLE_LENGTH else name[: MAX_TITLE_LENGTH - 1].rstrip() + "…"
+
+
+def _extract_model(specifications: tuple[tuple[str, str], ...]) -> str | None:
+    """Real model number/name from the source's own spec table (e.g.
+    Falabella's "Modelo": "SM L320NZSALTA"), instead of the "Genérico"
+    placeholder — publishing a real branded product (Samsung, Xiaomi, ...)
+    with a generic brand/model hurt MercadoLibre's quality score,
+    confirmed live 2026-09-22."""
+    for name, value in specifications:
+        if name.strip().lower() == "modelo":
+            return value
+    return None
 
 
 def main() -> None:
@@ -155,12 +173,18 @@ def main() -> None:
 
                 title = _truncate_title(product.name)
                 pictures = list(live.image_urls[:MAX_PICTURES])
+                brand = live.brand or product.brand or "Genérica"
+                model = _extract_model(live.specifications) or "Genérico"
+                extra_attributes = category_lookup.match_specifications(
+                    category_id, live.specifications, client=ml_public_client
+                )
 
                 if not confirm:
                     print(
                         f"PUBLICARÍA  {label}\n"
                         f"       categoria={category_id} precio={opp.sell_price} COP "
-                        f"fotos={len(pictures)}"
+                        f"fotos={len(pictures)} marca={brand} modelo={model} "
+                        f"atributos_extra={len(extra_attributes)}"
                     )
                     published += 1
                     continue
@@ -184,8 +208,10 @@ def main() -> None:
                             price=opp.sell_price,
                             currency="COP",
                             category_id=category_id,
-                            brand=product.brand or "Genérica",
+                            brand=brand,
+                            model=model,
                             pictures=pictures,
+                            extra_attributes=extra_attributes,
                         )
                         break
                     except RuntimeError as exc:

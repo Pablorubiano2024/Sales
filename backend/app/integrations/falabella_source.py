@@ -185,6 +185,7 @@ class FalabellaSourceAdapter(SourceAdapter):
             raw=item,
             reference_price=_reference_price(prices),
             image_urls=tuple(u for u in (item.get("mediaUrls") or []) if u),
+            brand=item.get("brand") or None,
         )
 
     def search_products(self, query: str, limit: int = 20) -> list[SourceProductInfo]:
@@ -245,6 +246,11 @@ class FalabellaSourceAdapter(SourceAdapter):
             # the real photos live on the active variant (see helper docstring).
             image_urls = _image_urls_from_medias(variant.get("medias") or [])
 
+        specs = (product.get("attributes") or {}).get("specifications") or []
+        specifications = tuple(
+            (s["name"], s["value"]) for s in specs if s.get("name") and s.get("value")
+        )
+
         return SourceProductInfo(
             external_id=external_id,
             name=product.get("name", f"Product {external_id}"),
@@ -255,6 +261,8 @@ class FalabellaSourceAdapter(SourceAdapter):
             url=str(response.url),
             raw=product,
             image_urls=image_urls,
+            brand=product.get("brandName") or None,
+            specifications=specifications,
         )
 
     def get_price(self, external_id: str) -> Decimal | None:

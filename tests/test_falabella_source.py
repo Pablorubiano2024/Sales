@@ -65,6 +65,7 @@ def test_search_products_parses_real_response_shape() -> None:
         "https://media.falabella.com.co/falabellaCO/73568541_01/public",
         "https://media.falabella.com.co/falabellaCO/73568541_02/public",
     )
+    assert product.brand == "HISENSE"
 
 
 def test_search_products_reference_price_is_none_without_a_real_discount() -> None:
@@ -222,6 +223,45 @@ def test_get_product_falls_back_to_variant_images_when_top_level_is_a_placeholde
     assert product.image_urls == (
         "https://media.falabella.com/falabellaCO/137938700_01/public",
         "https://media.falabella.com/falabellaCO/137938700_02/public",
+    )
+
+
+def test_get_product_extracts_real_brand_and_specifications() -> None:
+    """Falabella reports a real brand and a spec table on the detail page —
+    using these instead of a "Genérica"/"Genérico" placeholder is a real
+    MercadoLibre publication-quality improvement, confirmed live
+    2026-09-22 (Samsung Galaxy Watch published as brand "Genérica" hurt
+    its quality score)."""
+    product_data = {
+        "id": "147573614",
+        "name": "Reloj Galaxy Watch 8 40mm Silver",
+        "isOutOfStock": False,
+        "brandName": "SAMSUNG",
+        "prices": [{"type": "internetPrice", "price": ["2.199.900"]}],
+        "attributes": {
+            "specifications": [
+                {"id": "6_model", "name": "Modelo", "value": "SM L320NZSALTA"},
+                {
+                    "id": "2068_compatible_con",
+                    "name": "Compatible con",
+                    "value": "Android",
+                },
+                {"id": "no_value", "name": "Algo sin valor", "value": ""},
+            ]
+        },
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text=_html_with_next_data({"productData": product_data}))
+
+    adapter = _adapter(handler)
+    product = adapter.get_product("147573614")
+
+    assert product is not None
+    assert product.brand == "SAMSUNG"
+    assert product.specifications == (
+        ("Modelo", "SM L320NZSALTA"),
+        ("Compatible con", "Android"),
     )
 
 

@@ -47,6 +47,19 @@ class SourceProductInfo:
     # listing type effectively requires one) must handle that case rather
     # than assume it's always present.
     image_urls: tuple[str, ...] = ()
+    # The source's own reported brand name (e.g. Falabella's "SAMSUNG"),
+    # as-is — not normalized/guessed. None when the source has no brand
+    # concept for this product. Publishing with a "Genérica" placeholder
+    # when the real brand is known is a real MercadoLibre quality-score
+    # hit (confirmed live 2026-09-22) — prefer this over any fallback.
+    brand: str | None = None
+    # Real (name, value) spec pairs the source itself reports (e.g.
+    # Falabella's product detail "Características" table: "Modelo",
+    # "Capacidad de almacenamiento", "Compatible con", ...) — not
+    # normalized to any particular schema. Used to fill in optional
+    # MercadoLibre category attributes beyond BRAND/MODEL when a real
+    # match exists (see category_lookup.match_specifications).
+    specifications: tuple[tuple[str, str], ...] = ()
 
 
 class SourceAdapter(ABC):

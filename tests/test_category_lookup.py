@@ -91,3 +91,82 @@ def test_is_safe_to_autopublish_false_when_extra_attribute_required() -> None:
 
     with _client(handler) as client:
         assert category_lookup.is_safe_to_autopublish("MCO412089", client=client) is False
+
+
+_MCO118449_ATTRIBUTES = [
+    {"id": "BRAND", "name": "Marca", "value_type": "string", "tags": {"required": True}},
+    {"id": "MODEL", "name": "Modelo", "value_type": "string", "tags": {"required": True}},
+    {
+        "id": "DISPLAY_SIZE",
+        "name": "Tamaño de la pantalla",
+        "value_type": "number_unit",
+        "tags": {},
+    },
+    {"id": "DISPLAY_TYPE", "name": "Tipo de pantalla", "value_type": "string", "tags": {}},
+    {
+        "id": "SELLER_SKU",
+        "name": "SKU",
+        "value_type": "string",
+        "tags": {"hidden": True, "variation_attribute": True},
+    },
+]
+
+
+def test_match_specifications_matches_by_exact_normalized_name() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_MCO118449_ATTRIBUTES)
+
+    specifications = (("Tipo de pantalla", "Amoled"), ("Modelo", "SM L320NZSALTA"))
+    with _client(handler) as client:
+        matched = category_lookup.match_specifications("MCO118449", specifications, client=client)
+
+    # "Tipo de pantalla" -> DISPLAY_TYPE (string, safe). "Modelo" is
+    # excluded even though it matches — create_listing's own `model` param
+    # already handles it.
+    assert matched == [{"id": "DISPLAY_TYPE", "value_name": "Amoled"}]
+
+
+def test_match_specifications_skips_non_string_value_types() -> None:
+    """DISPLAY_SIZE is a real attribute named exactly "Tamaño de la
+    pantalla" (same as Falabella's spec) but is `number_unit`, which needs
+    a structured {number, unit} shape this can't safely guess from free
+    text — must not match it."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_MCO118449_ATTRIBUTES)
+
+    specifications = (("Tamaño de la pantalla", "1.34"),)
+    with _client(handler) as client:
+        matched = category_lookup.match_specifications("MCO118449", specifications, client=client)
+
+    assert matched == []
+
+
+def test_match_specifications_ignores_accents_and_case() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_MCO118449_ATTRIBUTES)
+
+    specifications = (("TIPO DE PANTALLA", "Amoled"),)
+    with _client(handler) as client:
+        matched = category_lookup.match_specifications("MCO118449", specifications, client=client)
+
+    assert matched == [{"id": "DISPLAY_TYPE", "value_name": "Amoled"}]
+
+
+def test_match_specifications_skips_hidden_attributes() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_MCO118449_ATTRIBUTES)
+
+    specifications = (("SKU", "ABC123"),)
+    with _client(handler) as client:
+        matched = category_lookup.match_specifications("MCO118449", specifications, client=client)
+
+    assert matched == []
+
+
+def test_match_specifications_empty_input_skips_the_api_call() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("should not call the API with no specifications to match")
+
+    with _client(handler) as client:
+        assert category_lookup.match_specifications("MCO118449", (), client=client) == []
