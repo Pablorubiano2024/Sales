@@ -84,6 +84,10 @@ def analyze_opportunity(payload: dict) -> dict:
     return _request("POST", "/api/opportunities/analyze", json=payload)
 
 
+def get_sources() -> list[dict]:
+    return _request("GET", "/api/sources")
+
+
 def get_orders(**params: Any) -> list[dict]:
     return _request("GET", "/api/orders", params=params)
 

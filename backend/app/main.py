@@ -19,6 +19,7 @@ from backend.app.api import (
     orders,
     products,
     settings,
+    sources,
 )
 from backend.app.core.config import get_settings
 from backend.app.core.database import init_db
@@ -58,6 +59,7 @@ app.include_router(health.router)
 app.include_router(products.router)
 app.include_router(opportunities.router)
 app.include_router(orders.router)
+app.include_router(sources.router)
 app.include_router(marketplaces.router)
 app.include_router(mercadolibre_oauth.router)
 app.include_router(settings.router)

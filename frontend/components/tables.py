@@ -11,7 +11,9 @@ _PILL_STYLE = "font-weight:600; border-radius:6px; padding:2px 8px;"
 
 
 def render_opportunities_table(
-    opportunities: list[dict], products_by_id: dict[str, dict]
+    opportunities: list[dict],
+    products_by_id: dict[str, dict],
+    sources_by_id: dict[str, dict] | None = None,
 ) -> dict | None:
     """Renders the opportunities table and returns the clicked row's full
     opportunity dict (or None if nothing is selected) — the caller uses
@@ -20,14 +22,17 @@ def render_opportunities_table(
         st.info("Ninguna oportunidad coincide con los filtros actuales.")
         return None
 
+    sources_by_id = sources_by_id or {}
     rows = []
     status_values = []
     for opp in opportunities:
         product = products_by_id.get(opp["product_id"], {})
+        source = sources_by_id.get(opp["source_id"], {})
         status_values.append(opp["status"])
         rows.append(
             {
                 "Producto": product.get("name", opp["product_id"]),
+                "Fuente": source.get("name", "—"),
                 "Precio compra": opp["buy_price"],
                 "Precio venta": opp["sell_price"],
                 "Ganancia neta": opp["net_profit"],
