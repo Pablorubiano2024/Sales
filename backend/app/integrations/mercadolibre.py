@@ -203,10 +203,19 @@ class MercadoLibreAdapter(MarketplaceAdapter):
                 "GET /sites/{site_id}/domain_discovery/search?q=<title>."
             )
 
+        # COP (and other zero-decimal currencies) reject a price with any
+        # decimal precision at all — confirmed live 2026-09-21
+        # ("item.price.invalid: Currency Peso colombiano (COP) does not
+        # support decimal precision") — so a whole-number Decimal must be
+        # sent as an int, not 5000.0.
+        price_value: float | int = (
+            int(price) if price == price.to_integral_value() else float(price)
+        )
+
         payload: dict[str, Any] = {
             "title": title,
             "category_id": category_id,
-            "price": float(price),
+            "price": price_value,
             "currency_id": currency,
             "available_quantity": available_quantity,
             "buying_mode": "buy_it_now",

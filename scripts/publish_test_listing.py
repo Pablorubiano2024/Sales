@@ -32,8 +32,18 @@ from backend.app.integrations.mercadolibre import MercadoLibreAdapter  # noqa: E
 
 TITLE = "Item de Prueba - Por favor, NO OFERTAR"
 CATEGORY_ID = "MCO412060"  # "Llaveros" — verified live, accepts BRAND="Generic"
-PRICE = Decimal("5000")  # COP — trivial, well above ML's ~$2,900 COP minimum
+PRICE = Decimal("5000")  # COP — trivial, well above ML's ~$2,900 COP minimum. Must be a
+# whole number: COP rejects any decimal precision (verified live 2026-09-21).
 CURRENCY = "COP"
+LISTING_TYPE_ID = "free"  # no cost, no premium visibility — requires a picture, hence below.
+# A real, licensed (CC-BY-SA), publicly reachable image — verified live
+# 2026-09-21 (200 OK, image/jpeg). "bronze" was tried first as a
+# no-picture-required alternative, but MercadoLibre silently normalizes it
+# to "gold_special" server-side, which does require one — so a real
+# picture is simpler and more reliable than chasing tier quirks.
+PICTURES = [
+    "https://upload.wikimedia.org/wikipedia/commons/thumb/a/a0/Keychain.jpg/500px-Keychain.jpg"
+]
 
 
 def main() -> None:
@@ -49,13 +59,18 @@ def main() -> None:
                 )
 
             print(f"Publicando: {TITLE!r}")
-            print(f"  category_id={CATEGORY_ID} price={PRICE} {CURRENCY} listing_type=free")
+            print(
+                f"  category_id={CATEGORY_ID} price={PRICE} {CURRENCY} "
+                f"listing_type={LISTING_TYPE_ID}"
+            )
             listing = adapter.create_listing(
                 product_id="test",
                 title=TITLE,
                 price=PRICE,
                 currency=CURRENCY,
                 category_id=CATEGORY_ID,
+                listing_type_id=LISTING_TYPE_ID,
+                pictures=PICTURES,
             )
             print(f"Publicado: {listing.external_id} — {listing.url}")
             print(f"Estado: {listing.status}")
