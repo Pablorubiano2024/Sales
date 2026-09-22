@@ -5,7 +5,9 @@ docs (see mercadolibre.py's module docstring for the verified source)."""
 
 from __future__ import annotations
 
+import json
 from datetime import timedelta
+from decimal import Decimal
 from types import SimpleNamespace
 
 import httpx
@@ -133,3 +135,65 @@ def test_authenticate_returns_false_when_verification_call_fails(
 
     with MercadoLibreAdapter(db_session, transport=httpx.MockTransport(handler)) as adapter:
         assert adapter.authenticate() is False
+
+
+def test_create_listing_requires_category_id(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(ml_module, "get_settings", lambda: FAKE_SETTINGS)
+    with MercadoLibreAdapter(
+        db_session, transport=httpx.MockTransport(lambda r: httpx.Response(200))
+    ) as adapter:
+        adapter._authenticated = True  # noqa: SLF001 — bypass auth for this unit test
+        adapter._access_token = "tok"  # noqa: SLF001
+        with pytest.raises(ValueError, match="category_id"):
+            adapter.create_listing("prod-1", "Item de Prueba", Decimal("10000"), "COP")
+
+
+def test_create_listing_requires_authentication_first(db_session: Session) -> None:
+    with MercadoLibreAdapter(db_session) as adapter:
+        with pytest.raises(RuntimeError, match="authenticate"):
+            adapter.create_listing(
+                "prod-1", "Item de Prueba", Decimal("10000"), "COP", category_id="MCO412060"
+            )
+
+
+def test_create_listing_posts_verified_payload_and_parses_response(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(ml_module, "get_settings", lambda: FAKE_SETTINGS)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/items"
+        assert request.headers["authorization"] == "Bearer tok"
+        payload = json.loads(request.read())
+        assert payload["category_id"] == "MCO412060"
+        assert payload["listing_type_id"] == "free"
+        assert payload["currency_id"] == "COP"
+        assert {"id": "BRAND", "value_name": "Generic"} in payload["attributes"]
+        return httpx.Response(
+            201,
+            json={
+                "id": "MCO123456789",
+                "title": payload["title"],
+                "price": payload["price"],
+                "currency_id": "COP",
+                "status": "active",
+                "permalink": "https://articulo.mercadolibre.com.co/MCO-123456789",
+            },
+        )
+
+    with MercadoLibreAdapter(db_session, transport=httpx.MockTransport(handler)) as adapter:
+        adapter._authenticated = True  # noqa: SLF001
+        adapter._access_token = "tok"  # noqa: SLF001
+        result = adapter.create_listing(
+            "prod-1",
+            "Item de Prueba - Por favor, NO OFERTAR",
+            Decimal("5000"),
+            "COP",
+            category_id="MCO412060",
+        )
+
+    assert result.external_id == "MCO123456789"
+    assert result.status == "active"
+    assert result.url == "https://articulo.mercadolibre.com.co/MCO-123456789"

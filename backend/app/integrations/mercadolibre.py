@@ -166,13 +166,81 @@ class MercadoLibreAdapter(MarketplaceAdapter):
         )
 
     def create_listing(
-        self, product_id: str, title: str, price: Decimal, currency: str
+        self,
+        product_id: str,
+        title: str,
+        price: Decimal,
+        currency: str,
+        *,
+        category_id: str | None = None,
+        brand: str = "Generic",
+        model: str = "Genérico",
+        condition: str = "new",
+        listing_type_id: str = "free",
+        available_quantity: int = 1,
+        pictures: list[str] | None = None,
     ) -> MarketplaceListingInfo:
-        # TODO: POST /items — confirm required fields (category_id,
-        # condition, listing_type_id, pictures, attributes...) against a
-        # real sandbox call before implementing; MercadoLibre rejects
-        # incomplete payloads with a detailed error, not a guess-friendly one.
-        raise NotImplementedError("MercadoLibre create_listing: payload schema not yet verified.")
+        """POST /items. Payload verified against MercadoLibre's own docs
+        (developers.mercadolibre.com.ar/publica-productos, updated
+        2026-01-09) and a real category's required attributes (checked live
+        2026-09-21: GET /categories/{id}/attributes). `category_id` has no
+        sane default — every category has different required attributes, so
+        this deliberately isn't looked up automatically yet (that needs a
+        real category-prediction step per product, not built here). `brand`
+        MUST be a value this category actually accepts (many, not all,
+        accept "Generic" for unbranded products) — check
+        GET /categories/{category_id}/attributes first.
+
+        MercadoLibre has no sandbox (see "Realiza pruebas" docs) — this
+        creates a REAL, public, live listing on the connected seller
+        account. `listing_type_id="free"` avoids any cost."""
+        if not self._authenticated or self._access_token is None:
+            raise RuntimeError("Call authenticate() before create_listing().")
+        if category_id is None:
+            raise ValueError(
+                "category_id is required — every MercadoLibre category has different "
+                "required attributes, so there's no sane default. Look one up first via "
+                "GET /sites/{site_id}/domain_discovery/search?q=<title>."
+            )
+
+        payload: dict[str, Any] = {
+            "title": title,
+            "category_id": category_id,
+            "price": float(price),
+            "currency_id": currency,
+            "available_quantity": available_quantity,
+            "buying_mode": "buy_it_now",
+            "condition": condition,
+            "listing_type_id": listing_type_id,
+            "attributes": [
+                {"id": "BRAND", "value_name": brand},
+                {"id": "MODEL", "value_name": model},
+            ],
+        }
+        if pictures:
+            payload["pictures"] = [{"source": url} for url in pictures]
+
+        response = self._client.post(
+            "/items",
+            headers={"Authorization": f"Bearer {self._access_token}"},
+            json=payload,
+        )
+        if response.status_code not in (200, 201):
+            logger.error("MercadoLibre create_listing failed: %s", response.text)
+            raise RuntimeError(
+                f"MercadoLibre create_listing failed ({response.status_code}): {response.text}"
+            )
+
+        data = response.json()
+        return MarketplaceListingInfo(
+            external_id=data["id"],
+            title=data["title"],
+            price=Decimal(str(data["price"])),
+            currency=data["currency_id"],
+            status=data["status"],
+            url=data.get("permalink"),
+            raw=data,
+        )
 
     def update_listing(self, external_id: str, **fields: Any) -> MarketplaceListingInfo:
         # TODO: PUT /items/{item_id}
