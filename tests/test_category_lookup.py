@@ -170,3 +170,94 @@ def test_match_specifications_empty_input_skips_the_api_call() -> None:
 
     with _client(handler) as client:
         assert category_lookup.match_specifications("MCO118449", (), client=client) == []
+
+
+_BOUNDED_ATTRIBUTES = [
+    {
+        "id": "WRISTBAND_MATERIAL",
+        "name": "Material de la malla",
+        "value_type": "string",
+        "tags": {},
+        "values": [{"id": "1", "name": "Silicona"}, {"id": "2", "name": "Cuero"}],
+    },
+    {
+        "id": "WITH_BLUETOOTH",
+        "name": "Con Bluetooth",
+        "value_type": "boolean",
+        "tags": {},
+        "values": [{"id": "1", "name": "Sí"}, {"id": "2", "name": "No"}],
+    },
+    {
+        "id": "SMARTWATCH_COMPATIBLE_OS",
+        "name": "Sistemas operativos compatibles del smartwatch",
+        "value_type": "string",
+        "tags": {"multivalued": True},
+        "values": [{"id": "1", "name": "Android"}, {"id": "2", "name": "iOS"}],
+    },
+]
+
+
+def test_match_specifications_validates_against_real_bounded_values() -> None:
+    """WRISTBAND_MATERIAL has value_type "string" but a real, bounded
+    vocabulary (verified live 2026-09-25) — a matching real value should
+    be accepted using the list's own canonical casing."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_BOUNDED_ATTRIBUTES)
+
+    specifications = (("Material de la malla", "silicona"),)  # lowercase, real casing differs
+    with _client(handler) as client:
+        matched = category_lookup.match_specifications("MCO118449", specifications, client=client)
+
+    assert matched == [{"id": "WRISTBAND_MATERIAL", "value_name": "Silicona"}]
+
+
+def test_match_specifications_rejects_value_not_in_bounded_list() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_BOUNDED_ATTRIBUTES)
+
+    specifications = (("Material de la malla", "Titanio"),)  # not a real option
+    with _client(handler) as client:
+        matched = category_lookup.match_specifications("MCO118449", specifications, client=client)
+
+    assert matched == []
+
+
+def test_match_specifications_uses_known_synonym_for_confirmed_name_mismatch() -> None:
+    """Falabella's "Material de la correa" and MercadoLibre's
+    "Material de la malla" (WRISTBAND_MATERIAL) are the same real concept
+    under different names — confirmed live 2026-09-25."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_BOUNDED_ATTRIBUTES)
+
+    specifications = (("Material de la correa", "Silicona"),)
+    with _client(handler) as client:
+        matched = category_lookup.match_specifications("MCO118449", specifications, client=client)
+
+    assert matched == [{"id": "WRISTBAND_MATERIAL", "value_name": "Silicona"}]
+
+
+def test_match_specifications_skips_multivalued_attributes() -> None:
+    """Submission shape for a multivalued attribute (e.g. multiple
+    compatible OSes) isn't confirmed — must not guess it."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_BOUNDED_ATTRIBUTES)
+
+    specifications = (("Sistemas operativos compatibles del smartwatch", "Android"),)
+    with _client(handler) as client:
+        matched = category_lookup.match_specifications("MCO118449", specifications, client=client)
+
+    assert matched == []
+
+
+def test_match_specifications_matches_boolean_value_from_yes_no_text() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_BOUNDED_ATTRIBUTES)
+
+    specifications = (("Con Bluetooth", "sí"),)
+    with _client(handler) as client:
+        matched = category_lookup.match_specifications("MCO118449", specifications, client=client)
+
+    assert matched == [{"id": "WITH_BLUETOOTH", "value_name": "Sí"}]

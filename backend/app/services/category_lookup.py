@@ -85,38 +85,82 @@ def list_attributes(category_id: str, *, client: httpx.Client) -> list[dict[str,
         return []
 
 
+# A handful of confirmed real-world name mismatches between Falabella's
+# spec labels and MercadoLibre's attribute names for the same concept
+# (checked live 2026-09-25 against category MCO118449 — smartwatches).
+# Used only as a fallback when no exact name match exists, and only ever
+# applied to an attribute id that's actually present (with a compatible
+# value_type) in the category being published to — so this being generic
+# across categories is harmless, not just watch-specific.
+_KNOWN_SYNONYMS: dict[str, str] = {
+    "material de la correa": "WRISTBAND_MATERIAL",
+    "color principal de la correa": "WRISTBAND_COLOR",
+    "conexion bluetooth": "WITH_BLUETOOTH",
+}
+
+
+def _match_bounded_value(attr: dict[str, Any], raw_value: str) -> str | None:
+    """When the attribute has a real, bounded `values` list (a controlled
+    vocabulary, even for value_type "string"/"boolean" — e.g.
+    WRISTBAND_MATERIAL only accepts 6 real material names), return the
+    list's own canonical name on an exact case-insensitive match, else
+    None. When there's no bounded list at all, the raw value is accepted
+    as free text."""
+    values = attr.get("values")
+    if not values:
+        return raw_value
+    normalized = _normalize(raw_value)
+    for v in values:
+        if _normalize(v["name"]) == normalized:
+            return str(v["name"])
+    return None
+
+
 def match_specifications(
     category_id: str, specifications: tuple[tuple[str, str], ...], *, client: httpx.Client
 ) -> list[dict[str, str]]:
     """Map a source's real (name, value) spec pairs onto this category's
-    real attributes by an exact, normalized name match — e.g. Falabella's
-    "Tamaño de la pantalla" -> MercadoLibre's DISPLAY_SIZE attribute of
-    the same name. Deliberately conservative: only free-text (`value_type
-    == "string"`) attributes are matched (a "list"/`number_unit` attribute
-    needs a specific value_id or structured {number, unit} shape this
-    can't safely guess), never hidden/read-only ones, and never BRAND/
-    MODEL/ITEM_CONDITION (already handled by create_listing's own params).
-    No fuzzy matching — a near-miss name is treated as no match rather
-    than risk sending the wrong value."""
+    real attributes — first by an exact, normalized name match (e.g.
+    Falabella's "Tipo de pantalla" -> MercadoLibre's attribute of the same
+    name), then by a small curated synonym table for confirmed real
+    mismatches (see _KNOWN_SYNONYMS). Deliberately conservative:
+      - Only `value_type` "string" or "boolean" (a `number_unit`/"list"
+        attribute needs a structured {number, unit} shape or a specific
+        value_id this can't safely guess from free text).
+      - Never hidden, read-only, or multivalued (submission shape for
+        multiple values isn't confirmed here) attributes.
+      - Never BRAND/MODEL/ITEM_CONDITION (create_listing's own params).
+      - When the attribute has a real bounded value list (many "string"
+        attributes do, e.g. WRISTBAND_MATERIAL), the source's value must
+        match one of those real options exactly (accent/case-insensitive)
+        or it's skipped — never sent as a guessed free-text value.
+    No fuzzy name matching — a near-miss name is treated as no match
+    rather than risk sending the wrong value."""
     if not specifications:
         return []
 
     attributes = list_attributes(category_id, client=client)
-    by_name = {
-        _normalize(a["name"]): a["id"]
+    eligible = {
+        a["id"]: a
         for a in attributes
-        if a.get("value_type") == "string"
+        if a.get("value_type") in ("string", "boolean")
         and a["id"] not in _HANDLED_ELSEWHERE
         and not (a.get("tags") or {}).get("hidden")
         and not (a.get("tags") or {}).get("read_only")
+        and not (a.get("tags") or {}).get("multivalued")
     }
+    by_name = {_normalize(a["name"]): a["id"] for a in eligible.values()}
 
     matched: list[dict[str, str]] = []
     seen_ids: set[str] = set()
     for spec_name, spec_value in specifications:
-        attr_id = by_name.get(_normalize(spec_name))
-        if attr_id is None or attr_id in seen_ids:
+        normalized_name = _normalize(spec_name)
+        attr_id = by_name.get(normalized_name) or _KNOWN_SYNONYMS.get(normalized_name)
+        if attr_id is None or attr_id in seen_ids or attr_id not in eligible:
             continue
-        matched.append({"id": attr_id, "value_name": spec_value})
+        value = _match_bounded_value(eligible[attr_id], spec_value)
+        if value is None:
+            continue
+        matched.append({"id": attr_id, "value_name": value})
         seen_ids.add(attr_id)
     return matched
