@@ -4,6 +4,8 @@ shapes match domain_discovery/categories-attributes verified live
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 import httpx
 
 from backend.app.services import category_lookup
@@ -110,6 +112,70 @@ _MCO118449_ATTRIBUTES = [
         "tags": {"hidden": True, "variation_attribute": True},
     },
 ]
+
+
+_LISTING_PRICES_RESPONSE = [
+    {"listing_type_id": "gold_pro", "sale_fee_amount": 100000},
+    {"listing_type_id": "gold_special", "sale_fee_amount": 82500},
+    {"listing_type_id": "free", "sale_fee_amount": 0},
+]
+
+
+def test_get_sale_commission_pct_computes_the_real_fraction() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/sites/MCO/listing_prices"
+        assert request.url.params["price"] == "500000"
+        assert request.url.params["category_id"] == "MCO456045"
+        assert request.headers["authorization"] == "Bearer tok"
+        return httpx.Response(200, json=_LISTING_PRICES_RESPONSE)
+
+    with _client(handler) as client:
+        pct = category_lookup.get_sale_commission_pct(
+            "MCO456045", Decimal("500000"), client=client, access_token="tok"
+        )
+
+    assert pct == Decimal("0.1650")
+
+
+def test_get_sale_commission_pct_respects_listing_type_id() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_LISTING_PRICES_RESPONSE)
+
+    with _client(handler) as client:
+        pct = category_lookup.get_sale_commission_pct(
+            "MCO456045",
+            Decimal("500000"),
+            client=client,
+            access_token="tok",
+            listing_type_id="free",
+        )
+
+    assert pct == Decimal("0.0000")
+
+
+def test_get_sale_commission_pct_returns_none_when_type_not_offered() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_LISTING_PRICES_RESPONSE)
+
+    with _client(handler) as client:
+        pct = category_lookup.get_sale_commission_pct(
+            "MCO456045",
+            Decimal("500000"),
+            client=client,
+            access_token="tok",
+            listing_type_id="silver",
+        )
+
+    assert pct is None
+
+
+def test_get_sale_commission_pct_returns_none_on_http_error() -> None:
+    with _client(lambda r: httpx.Response(403)) as client:
+        pct = category_lookup.get_sale_commission_pct(
+            "MCO456045", Decimal("500000"), client=client, access_token="tok"
+        )
+
+    assert pct is None
 
 
 def test_match_specifications_matches_by_exact_normalized_name() -> None:

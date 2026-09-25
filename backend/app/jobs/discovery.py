@@ -39,13 +39,22 @@ def build_opportunity_inputs(
     shipping_cost_cop: Decimal,
     min_buy_price_cop: Decimal,
     estimated_sell_price_multiplier: Decimal = Decimal("1.8"),
+    marketplace_fee_pct: Decimal | None = None,
 ) -> OpportunityCreate | None:
     """Convert a live `SourceProductInfo` into the inputs `evaluate_opportunity`
     needs — the same buy/sell/fee math `run_discovery` uses for a fresh
     search result, factored out so `sync_marketplace_listings.py` can
     recompute an already-published listing's opportunity identically
     instead of duplicating this logic. Returns None when the buy price
-    doesn't clear `min_buy_price_cop` (see run_discovery's docstring)."""
+    doesn't clear `min_buy_price_cop` (see run_discovery's docstring).
+
+    `marketplace_fee_pct` overrides `settings.marketplace_commission_pct`
+    when given — the real commission is category-specific (confirmed live
+    2026-09-25: 16.5% for Freidoras vs 12.0% for Relojes under the paid
+    "Clásica" tier, not a flat 15%), so a caller that already knows the
+    real category should look it up via
+    `category_lookup.get_sale_commission_pct` and pass it here instead of
+    trusting the flat estimate."""
     buy_price_cop = convert_to_cop(candidate.price, candidate.currency, settings)
     if buy_price_cop < min_buy_price_cop:
         return None
@@ -59,9 +68,12 @@ def build_opportunity_inputs(
             Decimal("0.01")
         )
 
-    marketplace_fee = (estimated_sell_price * settings.marketplace_commission_pct).quantize(
-        Decimal("0.01")
+    fee_pct = (
+        marketplace_fee_pct
+        if marketplace_fee_pct is not None
+        else settings.marketplace_commission_pct
     )
+    marketplace_fee = (estimated_sell_price * fee_pct).quantize(Decimal("0.01"))
 
     return OpportunityCreate(
         product_id=product_id,

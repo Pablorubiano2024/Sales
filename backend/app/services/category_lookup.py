@@ -1,6 +1,7 @@
 """Real MercadoLibre category prediction + required-attribute check.
 
-Both endpoints are public (no auth needed) — verified live 2026-09-22:
+`predict_category`/`list_attributes` are public (no auth needed) —
+verified live 2026-09-22:
   - GET /sites/MCO/domain_discovery/search?q=<free text>
       -> list of {domain_id, domain_name, category_id, category_name,
          attributes}, ordered by relevance.
@@ -13,11 +14,21 @@ BRAND and MODEL (see mercadolibre.py) — a category that requires anything
 else (e.g. POWER_SUPPLY_TYPE) has no real per-product value available at
 mass-publish time and must be skipped for manual review rather than
 guessing one.
+
+`get_sale_commission_pct` (verified live 2026-09-25) hits the same
+`/sites/MCO/listing_prices` endpoint used elsewhere, but it now requires
+auth (`403 PA_UNAUTHORIZED_RESULT_FROM_POLICIES` without a bearer token —
+this wasn't true earlier in the same week, so don't assume it stays
+public). The real "Clásica" (gold_special) commission is category-
+specific, not the flat estimate `Settings.marketplace_commission_pct`
+assumed — confirmed live: 16.5% for MCO456045 (Freidoras) vs 12.0% for
+MCO118449 (Relojes), both flat across price points within the category.
 """
 
 from __future__ import annotations
 
 import unicodedata
+from decimal import Decimal
 from typing import Any
 
 import httpx
@@ -66,6 +77,43 @@ def is_safe_to_autopublish(category_id: str, *, client: httpx.Client) -> bool:
     create_listing() already supplies (BRAND, MODEL)."""
     required = required_attribute_ids(category_id, client=client)
     return set(required) <= SAFE_ATTRIBUTE_IDS
+
+
+def get_sale_commission_pct(
+    category_id: str,
+    price: Decimal,
+    *,
+    client: httpx.Client,
+    access_token: str,
+    listing_type_id: str = "gold_special",
+) -> Decimal | None:
+    """Real sale commission (as a fraction, e.g. 0.165) for this exact
+    category/price/listing_type — requires auth (see module docstring).
+    None if the lookup fails or that listing_type_id isn't offered here;
+    callers should fall back to `Settings.marketplace_commission_pct`
+    rather than guess a specific number."""
+    try:
+        response = client.get(
+            "/sites/MCO/listing_prices",
+            params={"price": str(price), "category_id": category_id},
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        response.raise_for_status()
+        options = response.json()
+    except httpx.HTTPError as exc:
+        logger.warning("listing_prices(category=%s, price=%s) failed: %s", category_id, price, exc)
+        return None
+
+    option = next(
+        (o for o in options if isinstance(o, dict) and o.get("listing_type_id") == listing_type_id),
+        None,
+    )
+    if option is None or price <= 0:
+        return None
+    sale_fee = option.get("sale_fee_amount")
+    if sale_fee is None:
+        return None
+    return (Decimal(str(sale_fee)) / price).quantize(Decimal("0.0001"))
 
 
 def _normalize(name: str) -> str:

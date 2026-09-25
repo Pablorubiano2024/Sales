@@ -25,13 +25,26 @@ For each APPROVED opportunity, in order:
      quality score, confirmed live 2026-09-22. Also maps any other real
      spec (e.g. "Tipo de pantalla") onto a matching category attribute by
      exact name, when one safely exists (category_lookup.match_specifications).
-  6. Publish via listing_service.publish_and_record(), which also records
+  6. Recompute the opportunity against the real, category-specific
+     "Clásica" (gold_special) sale commission (category_lookup.
+     get_sale_commission_pct) — skip if it's no longer actually
+     profitable under the real fee, not the flat estimate discovery used.
+  7. Publish via listing_service.publish_and_record(), which also records
      the MarketplaceProduct row the sync job depends on.
+
+Publishes under "Clásica" (gold_special), not "free": the free tier's
+quota is a real, scarce cap shared across every free listing the account
+holds at once (confirmed live 2026-09-25 — it dropped from 10 to 1 after
+publishing 10 real items and doesn't reset daily), so it can't support
+ongoing daily publishing. Clásica has no such cap, at the cost of a real
+sale commission instead of $0 — step 6 makes sure that's still covered.
 
 DRY RUN BY DEFAULT — prints exactly what would happen (publish vs. skip +
 reason) without creating any real listing. Real MercadoLibre has no
 sandbox: every publish here is a genuine, public, live item a real buyer
-could purchase. Pass --confirm to actually publish.
+could purchase. Pass --confirm to actually publish. Note: even a dry run
+now authenticates (a read-only token verify/refresh) because step 6 needs
+a bearer token for the real commission lookup.
 
 Usage:
     python scripts/publish_approved_opportunities.py            # dry run
@@ -42,6 +55,7 @@ from __future__ import annotations
 
 import sys
 import time
+from decimal import Decimal
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -60,14 +74,25 @@ from backend.app.integrations.mercadolibre import MercadoLibreAdapter  # noqa: E
 from backend.app.models.marketplace import ListingStatus, Marketplace  # noqa: E402
 from backend.app.models.opportunity import Opportunity, OpportunityStatus  # noqa: E402
 from backend.app.models.source import Source, SourceProduct  # noqa: E402
+from backend.app.schemas.opportunity import OpportunityCreate  # noqa: E402
 from backend.app.services import category_lookup, listing_service  # noqa: E402
+from backend.app.services.arbitrage_engine import evaluate_opportunity  # noqa: E402
 
 logger = get_logger(__name__)
 
 MAX_TITLE_LENGTH = 60  # MercadoLibre item title limit.
 MAX_PICTURES = 6
-# Free-tier listing creation has a real per-account cooldown — confirmed
-# live 2026-09-22, see the retry loop below.
+# "Free" (Gratuita) has a real, scarce quota shared across ALL free
+# listings the account holds at once (confirmed live 2026-09-25: it
+# dropped from 10 to 1 after publishing 10 real items and never
+# recovered) — not a per-day allowance, so it can't support daily
+# publishing. "Clásica" (gold_special) has no such cap, at the cost of a
+# real, category-specific sale commission (see get_sale_commission_pct
+# below) instead of $0.
+LISTING_TYPE_ID = "gold_special"
+# Seen so far only while the account still had free-tier listings in
+# flight, but kept as a general defensive retry for any listing_type —
+# confirmed live 2026-09-22, see the retry loop below.
 RATE_LIMIT_BACKOFF_SECONDS = 30
 MAX_RATE_LIMIT_RETRIES = 3
 
@@ -119,8 +144,14 @@ def main() -> None:
                 base_url=category_lookup.API_BASE_URL, timeout=category_lookup.DEFAULT_TIMEOUT
             ) as ml_public_client,
         ):
-            if confirm and not ml_adapter.authenticate():
+            # Authenticate even in a dry run — computing the real,
+            # category-specific sale commission below needs a bearer
+            # token (verified live 2026-09-25: /sites/MCO/listing_prices
+            # now requires auth). Authenticating is a read-only token
+            # refresh/verify, not a write.
+            if not ml_adapter.authenticate() or ml_adapter._access_token is None:  # noqa: SLF001
                 sys.exit("No hay una cuenta de MercadoLibre conectada/válida.")
+            access_token: str = ml_adapter._access_token  # noqa: SLF001
 
             for opp in opportunities:
                 product = opp.product
@@ -196,6 +227,52 @@ def main() -> None:
                     category_id, live.specifications, client=ml_public_client
                 )
 
+                # The real "Clásica" commission is category-specific (16.5%
+                # for Freidoras vs 12.0% for Relojes, confirmed live
+                # 2026-09-25) — recompute against it now rather than trust
+                # discovery's flat Settings.marketplace_commission_pct
+                # estimate, and skip if it's no longer actually profitable
+                # under the real fee. evaluate_opportunity upserts the same
+                # Opportunity row, so this also corrects it going forward.
+                real_commission_pct = category_lookup.get_sale_commission_pct(
+                    category_id,
+                    opp.sell_price,
+                    client=ml_public_client,
+                    access_token=access_token,
+                    listing_type_id=LISTING_TYPE_ID,
+                )
+                if real_commission_pct is not None:
+                    real_fee = (opp.sell_price * real_commission_pct).quantize(Decimal("0.01"))
+                    opp = evaluate_opportunity(
+                        db,
+                        OpportunityCreate(
+                            product_id=product.id,
+                            source_id=opp.source_id,
+                            marketplace_id=marketplace.id,
+                            buy_price=float(opp.buy_price),
+                            sell_price=float(opp.sell_price),
+                            marketplace_fee=float(real_fee),
+                            shipping_cost=float(opp.shipping_cost),
+                            tax_cost=float(opp.tax_cost),
+                            payment_cost=float(opp.payment_cost),
+                            other_cost=float(opp.other_cost),
+                        ),
+                    )
+                    if opp.status not in (OpportunityStatus.APPROVED, OpportunityStatus.PROMISING):
+                        print(
+                            f"SKIP  {label}: con comisión real de {LISTING_TYPE_ID} "
+                            f"({real_commission_pct:.1%}) ya no es rentable "
+                            f"(status={opp.status.value})"
+                        )
+                        skipped += 1
+                        continue
+                else:
+                    logger.warning(
+                        "No se pudo obtener la comisión real para categoría=%s; "
+                        "usando el estimado de Settings.marketplace_commission_pct",
+                        category_id,
+                    )
+
                 if not confirm:
                     print(
                         f"PUBLICARÍA  {label}\n"
@@ -227,6 +304,7 @@ def main() -> None:
                             category_id=category_id,
                             brand=brand,
                             model=model,
+                            listing_type_id=LISTING_TYPE_ID,
                             pictures=pictures,
                             extra_attributes=extra_attributes,
                         )

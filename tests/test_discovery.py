@@ -150,6 +150,38 @@ def test_marketplace_fee_and_shipping_are_deducted(
     )
 
 
+def test_build_opportunity_inputs_marketplace_fee_pct_overrides_settings(
+    _fixed_rate_settings: Settings,
+) -> None:
+    """The real commission is category-specific (16.5% for Freidoras vs
+    12.0% for Relojes under the paid "Clásica" tier, confirmed live
+    2026-09-25) — a caller that looked it up must be able to use it
+    instead of the flat Settings estimate."""
+    candidate = SourceProductInfo(
+        external_id="x",
+        name="Thing",
+        price=Decimal("100000"),
+        currency="COP",
+        stock_available=True,
+    )
+
+    inputs = discovery_module.build_opportunity_inputs(
+        candidate,
+        "product-1",
+        "source-1",
+        "marketplace-1",
+        _fixed_rate_settings,
+        shipping_cost_cop=Decimal("0"),
+        min_buy_price_cop=Decimal("0"),
+        marketplace_fee_pct=Decimal("0.12"),
+    )
+
+    assert inputs is not None
+    # sell = 100,000 * 1.8 = 180,000; fee = 180,000 * 0.12 = 21,600 — not
+    # the Settings default of 0.15 (27,000).
+    assert inputs.marketplace_fee == 21600.0
+
+
 def test_cheap_candidate_below_min_buy_price_is_skipped(
     db_session: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
