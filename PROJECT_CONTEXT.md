@@ -282,6 +282,23 @@ supplier → supplier ships directly to customer → profit tracked.
     identical `__enter__`/`__exit__` boilerplate — centralized on the ABC (`close` abstract,
     `__enter__`/`__exit__` concrete), which also fixed a real mypy error (typing a variable as
     `SourceAdapter` and using it as a context manager didn't type-check before this).
+- **MercadoLibre's "free" (Gratuita) listing type has a real, scarce quota that isn't a daily
+  allowance** — confirmed live 2026-09-25 via `GET /users/{id}/available_listing_types` ->
+  `remaining_listings`: started at 10, dropped to 1 after publishing 10 real items over a few days,
+  and did not reset day-to-day. This blocks using "free" for ongoing automated daily publishing.
+  Switched `publish_approved_opportunities.py` to `listing_type_id="gold_special"` ("Clásica"),
+  which has no such cap but charges a real sale commission — and that commission is
+  **category-specific**, not the flat 15% `Settings.marketplace_commission_pct` estimate: confirmed
+  live 16.5% for MCO456045 (Freidoras) vs 12.0% for MCO118449 (Relojes), via
+  `GET /sites/MCO/listing_prices?price=X&category_id=Y` (this endpoint started requiring auth
+  sometime this same week — it was public earlier). `category_lookup.get_sale_commission_pct()`
+  looks this up live; the publish script now recomputes each opportunity against the real
+  commission for its real category right before publishing and skips it if no longer actually
+  profitable, rather than trusting discovery's flat estimate. Daily publishing is now automated via
+  `.github/workflows/publish-marketplace-listings.yml` (06:30 America/Bogota, 30 min before the
+  daily sync) — it does NOT run discovery first, so it only draws from whatever's already
+  "approved"; the approved pool still needs a `discover_*.py` re-run periodically (manual) to not
+  run dry.
 
 ## DEPLOYED STATE (as of 2026-09-17)
 
