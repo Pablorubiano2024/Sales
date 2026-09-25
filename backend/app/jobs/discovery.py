@@ -122,7 +122,13 @@ def run_discovery(
     created_opportunity_ids: list[str] = []
 
     for query in queries:
-        for candidate in adapter.search_products(query):
+        # A stuck run gives no other signal to diagnose from otherwise —
+        # confirmed live 2026-09-25, a CI run hung with zero intermediate
+        # output and no way to tell which query/candidate it was on.
+        logger.info("Discovery: searching %r on %s", query, source.name)
+        candidates = adapter.search_products(query)
+        logger.info("Discovery: %r returned %d candidates", query, len(candidates))
+        for candidate in candidates:
             match = find_best_match(candidate.name, catalog)
 
             if match is not None:
