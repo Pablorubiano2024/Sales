@@ -1,0 +1,53 @@
+name: Publish approved opportunities
+
+# Runs scripts/publish_approved_opportunities.py --confirm once a day:
+# publishes every real "approved" Opportunity that isn't already live and
+# passes the real checks (category attributes, real photo, real
+# category-specific commission still leaves it profitable). Runs 30
+# minutes before the daily sync (sync-marketplace-listings.yml) so a
+# freshly published item is already tracked by the time sync runs. See
+# that script's docstring for the full logic — in particular, this
+# publishes under "Clásica" (gold_special), not "free": the free tier's
+# quota is a real, scarce cap shared across every free listing the
+# account holds at once, not a daily allowance, so it can't support
+# ongoing daily publishing (confirmed live 2026-09-25).
+#
+# Requires the same repo secrets as sync-marketplace-listings.yml
+# (Settings -> Secrets and variables -> Actions): DATABASE_URL,
+# ML_CLIENT_ID, ML_CLIENT_SECRET, ML_REDIRECT_URI.
+#
+# This is a real, consequential job — every run can create genuine public
+# MercadoLibre listings under the connected seller account. It does NOT
+# run discovery first, so it only draws from whatever Opportunities are
+# already "approved" in the database; pair it with periodically re-running
+# a discover_*.py script (still manual) to keep that pool from running dry.
+
+on:
+  schedule:
+    # 06:30 America/Bogota (UTC-5) daily — before the 07:00 sync run.
+    - cron: "30 11 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Poetry
+        run: pipx install poetry
+
+      - name: Install dependencies
+        run: poetry install --no-root --only main
+
+      - name: Publish approved opportunities
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ML_CLIENT_ID: ${{ secrets.ML_CLIENT_ID }}
+          ML_CLIENT_SECRET: ${{ secrets.ML_CLIENT_SECRET }}
+          ML_REDIRECT_URI: ${{ secrets.ML_REDIRECT_URI }}
+        run: poetry run python scripts/publish_approved_opportunities.py --confirm
