@@ -207,6 +207,51 @@ supplier → supplier ships directly to customer → profit tracked.
   doesn't (e.g. CJ, which has no such concept). Re-running discovery after the fix produced a
   believable mix (18 approved / 25 promising / 57 rejected out of 100), not the earlier
   near-100%-"promising" false positive.
+- **MercadoLibre listings are now tracked and kept in sync — `listing_service.py` +
+  `scripts/publish_approved_opportunities.py` + `scripts/sync_marketplace_listings.py`,
+  scheduled daily via `.github/workflows/sync-marketplace-listings.yml`.** `MarketplaceProduct`
+  (a pre-existing but previously unused table) now records every real `create_listing()` result.
+  The sync job re-fetches each active listing's source product daily, recomputes its Opportunity
+  via `discovery.build_opportunity_inputs` (extracted from `run_discovery` so both paths share the
+  same math), pauses the listing (never closes — reversible, per explicit user choice) if it's out
+  of stock or reclassified below "promising", and pushes a real price update otherwise. Verified
+  live 2026-09-22 through 2026-09-25: published 7 real Falabella opportunities, the scheduled GitHub
+  Action correctly auto-paused one when it actually went out of stock, and corrected two prices
+  that had drifted (one up, one down) from stale duplicate data.
+- **`evaluate_opportunity` was always inserting a new `Opportunity` row instead of updating the
+  existing one for the same (product, source, marketplace)** — every discovery re-run (a product
+  matched twice in one run, or a later day's re-run) silently created a duplicate with a
+  potentially different price, rather than refreshing the one row. Found via real production data:
+  87 duplicate groups / 144 stale rows out of 282 total. Fixed to upsert by that key (preserving
+  AI scores); the daily sync job depends on this being true (one stable Opportunity per listing to
+  track over time).
+- **Falabella's search-result product name and its own detail-page name for the same product can
+  genuinely differ** (confirmed live 2026-09-25) — e.g. a search result titled "Freidora De Aire
+  Air Fryer Esencial..." while that exact product's detail page says "Freidora De Aire **Imusa**
+  Air Fryer Esencial...". `run_discovery` stores the (poorer) search-result name on `Product.name`
+  and it's never refreshed automatically. `publish_approved_opportunities.py` now prefers the
+  richer detail-page name (`live.name`, already fetched for stock/photos) for the title and syncs
+  it back onto `Product.name`. Also now sends the source's real `brand`/model (from Falabella's own
+  `brandName` + "Modelo" spec) instead of a `"Genérica"/"Genérico"` placeholder — publishing a real
+  branded product as generic was hurting MercadoLibre's own publication-quality score. Real
+  brand/model + a handful of matched category attributes (`category_lookup.match_specifications` —
+  exact/synonym name match validated against the category's own real bounded value list, never a
+  guess) were also backfilled onto the first 7 live listings via `scripts/backfill_listing_brand_model.py`.
+- **Selling recognized international brands (Samsung, Xiaomi, ...) via retail arbitrage is not
+  flatly prohibited on MercadoLibre, but does draw real, automated scrutiny for a low-reputation
+  ("NEWBIE") seller account** — confirmed live 2026-09-23/25: MercadoLibre auto-paused 3 published
+  items citing "propiedad intelectual" and demanding the listing's brand/characteristics be
+  corrected to match the real product, warning that repeated infractions can lead to account
+  suspension. Researched MercadoLibre's own Brand Protection Program docs (not directly fetchable —
+  their help/vendedores domains 403 automated requests; summarized via search):
+  the program exists for the actual trademark holder to complain about a listing, and a legitimate
+  reseller of genuine goods can respond with proof (e.g. a purchase invoice) — gray-market resale
+  of authentic products bought at retail is a real channel-conflict/reputational risk, not
+  automatically an IP violation by itself. 2 of the 3 paused items auto-reactivated once the real
+  brand/title/characteristics were corrected (see above) — consistent with this being the
+  low-reputation-account fraud-prevention check, not an actual brand-owner complaint. User decision
+  (2026-09-25): keep publishing recognized brands, but keep purchase invoices from Falabella as a
+  defense if a real complaint ever comes in, and watch for MercadoLibre pause emails.
 
 ## DEPLOYED STATE (as of 2026-09-17)
 
