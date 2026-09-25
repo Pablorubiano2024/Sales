@@ -156,9 +156,19 @@ def main() -> None:
                     skipped += 1
                     continue
 
-                category_id = category_lookup.predict_category(
-                    product.name, client=ml_public_client
-                )
+                # Falabella's search-result name (what discovery stores on
+                # Product.name) and its detail-page name can genuinely
+                # differ — e.g. a real product's search listing omitted
+                # "Imusa" that its own detail page includes. The detail
+                # page (already fetched above as `live`) is the richer,
+                # more current one — prefer it for the actual publish, and
+                # sync it back onto the catalog so it stays accurate.
+                real_name = live.name or product.name
+                if real_name != product.name:
+                    product.name = real_name
+                    db.commit()
+
+                category_id = category_lookup.predict_category(real_name, client=ml_public_client)
                 if category_id is None:
                     print(f"SKIP  {label}: no se pudo predecir categoría")
                     skipped += 1
