@@ -17,7 +17,18 @@ from backend.app.core.config import get_settings
 
 settings = get_settings()
 
-_connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
+_connect_args = (
+    {"check_same_thread": False}
+    if settings.database_url.startswith("sqlite")
+    # Without an explicit bound, a network issue reaching a hosted Postgres
+    # (e.g. from a CI runner with a different network path than local dev)
+    # can hang the *first* connection attempt indefinitely — pool_pre_ping
+    # only protects a connection already established. Confirmed live
+    # 2026-09-25: a GitHub Actions discovery run hung 20+ minutes with no
+    # error on its very first DB write, while the same script ran normally
+    # (a few seconds to connect) from local dev.
+    else {"connect_timeout": 10}
+)
 
 engine = create_engine(
     settings.sqlalchemy_database_url,
