@@ -252,6 +252,36 @@ supplier → supplier ships directly to customer → profit tracked.
   low-reputation-account fraud-prevention check, not an actual brand-owner complaint. User decision
   (2026-09-25): keep publishing recognized brands, but keep purchase invoices from Falabella as a
   defense if a real complaint ever comes in, and watch for MercadoLibre pause emails.
+- **Two more real retail-arbitrage sources added, each verified live before writing code
+  (2026-09-25):**
+  - `HomecenterSourceAdapter` (`falabella_source.py`) — homecenter.falabella.com.co (Sodimac/
+    Homecenter, a sibling site in the Falabella corporate group) shares the exact same
+    `__NEXT_DATA__` JSON shape as falabella.com.co, so it reuses `FalabellaSourceAdapter`'s parsing
+    logic via a `path_prefix`/`base_url` parameterization rather than a separate implementation.
+    Its `/search` 301-redirects to a real category page for a recognized term (unlike Falabella's
+    own `/search`) — the client now follows redirects. Its `robots.txt` doesn't exist at all
+    (redirects to the site's own soft-404, HTTP 200) — not an explicit denial, but not an explicit
+    grant either, noted rather than assumed permissive.
+  - `ImusaSourceAdapter` (`imusa_source.py`) — imusa.com.co, Imusa's own direct-sale store, a
+    different platform (classic VTEX REST search API, not embedded page JSON). Its `robots.txt`
+    EXPLICITLY allows `/api/catalog_system/` (and explicitly lists ClaudeBot/Claude-User as
+    allowed user agents) — a real, deliberate grant. **Important asymmetry found the same day:**
+    Éxito (exito.com) runs the identical VTEX platform and its classic search API returns equally
+    clean data, but its `robots.txt` explicitly DISALLOWS `/api/` — so that path was deliberately
+    not used for Éxito. (Éxito's actual storefront is FastStore/React with no server-embedded
+    data and no confirmed public GraphQL query shape yet — building a real Éxito adapter needs
+    more investigation, not attempted.)
+  - Both wired into every source-aware script (`publish_approved_opportunities.py`,
+    `sync_marketplace_listings.py`, `backfill_listing_brand_model.py`) and given their own
+    `discover_homecenter.py`/`discover_imusa.py` scripts. First real discovery run: 89 Homecenter
+    opportunities (7 approved) and 47 Imusa opportunities (2 approved); 3 of the newly-approved
+    ones published live the same day.
+  - Fixed a real interface gap found while wiring this up: `SourceAdapter` never declared
+    `close()`/context-manager as part of its abstract interface, even though every concrete
+    adapter (Falabella, CJ, DummyJSON, and now Homecenter/Imusa) independently duplicated
+    identical `__enter__`/`__exit__` boilerplate — centralized on the ABC (`close` abstract,
+    `__enter__`/`__exit__` concrete), which also fixed a real mypy error (typing a variable as
+    `SourceAdapter` and using it as a context manager didn't type-check before this).
 
 ## DEPLOYED STATE (as of 2026-09-17)
 
