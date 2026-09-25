@@ -1,19 +1,31 @@
-"""Real source adapter for falabella.com.co — NOT an official API (Falabella
-doesn't offer a public product API to individual sellers), but a genuine,
-verified data source: falabella.com.co is a Next.js app that embeds full,
-structured product data (name, brand, prices, stock) as JSON in a
-`<script id="__NEXT_DATA__">` tag on both search and product pages — a
-plain unauthenticated GET + JSON parse, no headless browser needed.
+"""Real source adapter for the Falabella corporate group's shared Next.js
+storefront platform — NOT an official API (none of these sites offer a
+public product API to individual sellers), but a genuine, verified data
+source: the site embeds full, structured product data (name, brand,
+prices, stock) as JSON in a `<script id="__NEXT_DATA__">` tag on both
+search and product pages — a plain unauthenticated GET + JSON parse, no
+headless browser needed.
 
-Checked before writing this (2026-09-22):
+Two real sites confirmed to share this exact platform/JSON shape:
+  - falabella.com.co (`FalabellaSourceAdapter` / `path_prefix="falabella-co"`)
+  - homecenter.falabella.com.co, the Sodimac/Homecenter home-improvement
+    retailer (`HomecenterSourceAdapter` / `path_prefix="homecenter-co"`) —
+    confirmed live 2026-09-25: identical `__NEXT_DATA__.props.pageProps`
+    shape (`results` on search, `productData` on detail) down to field
+    names. `robots.txt` on this subdomain doesn't exist at all (redirects
+    to the site's own soft-404 page, HTTP 200) — not an explicit denial,
+    but also not an explicit grant like falabella.com.co's; noted rather
+    than assumed permissive.
+
+Checked before writing this (2026-09-22, Homecenter added 2026-09-25):
   - robots.txt (falabella.com.co/robots.txt) allows all crawlers except
     account/checkout/basket/orders paths, which this adapter never touches.
-  - GET /falabella-co/search?Ntt={query}
+  - GET /{path_prefix}/search?Ntt={query}
       -> __NEXT_DATA__.props.pageProps.results: list of {productId,
          displayName, brand, url, prices: [{type, price: ["1.234.567"],
          crossed}, ...]}. Prices are Colombian-formatted strings
          (period thousands separators, no decimals) — not JSON numbers.
-  - GET /falabella-co/product/{id}  (slug is optional — the bare numeric
+  - GET /{path_prefix}/product/{id}  (slug is optional — the bare numeric
     id resolves and redirects correctly)
       -> __NEXT_DATA__.props.pageProps.productData: {id, name, brandName,
          isOutOfStock, prices (top-level, same shape as search), variants}.
@@ -142,26 +154,38 @@ def _reference_price(prices: list[dict[str, Any]]) -> Decimal | None:
 
 
 class FalabellaSourceAdapter(SourceAdapter):
-    """Source adapter for falabella.com.co's embedded product JSON."""
+    """Source adapter for the Falabella group's shared storefront platform.
+    `base_url`/`path_prefix` default to falabella.com.co itself; subclasses
+    (e.g. `HomecenterSourceAdapter`) or direct callers can point this at
+    any confirmed sibling site sharing the same JSON shape."""
+
+    #: Used only in log messages, to say which real site a failure was
+    #: against — cosmetic, but misleading ones just say "Falabella" for
+    #: every site would work against the "never invent/mislead" principle.
+    source_label = "Falabella"
 
     def __init__(
         self,
         base_url: str = DEFAULT_BASE_URL,
         timeout: float = DEFAULT_TIMEOUT,
         transport: httpx.BaseTransport | None = None,
+        path_prefix: str = "falabella-co",
     ) -> None:
+        self._path_prefix = path_prefix
+        # Homecenter's /search redirects (301) to a real category page for
+        # a recognized term (e.g. "taladro" -> /category/CATG32701/Taladros)
+        # — confirmed live 2026-09-25 — which carries the same
+        # pageProps.results shape, so following it just works.
         self._client = httpx.Client(
-            base_url=base_url, timeout=timeout, transport=transport, headers=DEFAULT_HEADERS
+            base_url=base_url,
+            timeout=timeout,
+            transport=transport,
+            headers=DEFAULT_HEADERS,
+            follow_redirects=True,
         )
 
     def close(self) -> None:
         self._client.close()
-
-    def __enter__(self) -> FalabellaSourceAdapter:
-        return self
-
-    def __exit__(self, *exc_info: object) -> None:
-        self.close()
 
     def _parse_search_result(self, item: dict[str, Any]) -> SourceProductInfo | None:
         prices = item.get("prices") or []
@@ -190,15 +214,17 @@ class FalabellaSourceAdapter(SourceAdapter):
 
     def search_products(self, query: str, limit: int = 20) -> list[SourceProductInfo]:
         try:
-            response = self._client.get("/falabella-co/search", params={"Ntt": query})
+            response = self._client.get(f"/{self._path_prefix}/search", params={"Ntt": query})
             response.raise_for_status()
         except httpx.HTTPError as exc:
-            logger.warning("Falabella search_products('%s') failed: %s", query, exc)
+            logger.warning("%s search_products('%s') failed: %s", self.source_label, query, exc)
             return []
 
         data = _extract_next_data(response.text)
         if data is None:
-            logger.warning("Falabella search_products('%s'): no __NEXT_DATA__ found", query)
+            logger.warning(
+                "%s search_products('%s'): no __NEXT_DATA__ found", self.source_label, query
+            )
             return []
 
         results = data.get("props", {}).get("pageProps", {}).get("results", [])
@@ -207,17 +233,19 @@ class FalabellaSourceAdapter(SourceAdapter):
 
     def get_product(self, external_id: str) -> SourceProductInfo | None:
         try:
-            response = self._client.get(f"/falabella-co/product/{external_id}")
+            response = self._client.get(f"/{self._path_prefix}/product/{external_id}")
             if response.status_code == 404:
                 return None
             response.raise_for_status()
         except httpx.HTTPError as exc:
-            logger.warning("Falabella get_product('%s') failed: %s", external_id, exc)
+            logger.warning("%s get_product('%s') failed: %s", self.source_label, external_id, exc)
             return None
 
         data = _extract_next_data(response.text)
         if data is None:
-            logger.warning("Falabella get_product('%s'): no __NEXT_DATA__ found", external_id)
+            logger.warning(
+                "%s get_product('%s'): no __NEXT_DATA__ found", self.source_label, external_id
+            )
             return None
 
         product = data.get("props", {}).get("pageProps", {}).get("productData")
@@ -237,7 +265,9 @@ class FalabellaSourceAdapter(SourceAdapter):
                 prices = variant.get("prices") or []
                 price = _best_price(prices)
         if price is None:
-            logger.warning("Falabella get_product('%s'): unparseable/missing price", external_id)
+            logger.warning(
+                "%s get_product('%s'): unparseable/missing price", self.source_label, external_id
+            )
             return None
 
         image_urls = _image_urls_from_medias(product.get("medias") or [])
@@ -275,4 +305,24 @@ class FalabellaSourceAdapter(SourceAdapter):
 
     def get_product_url(self, external_id: str) -> str | None:
         base = str(self._client.base_url).rstrip("/")
-        return f"{base}/falabella-co/product/{external_id}"
+        return f"{base}/{self._path_prefix}/product/{external_id}"
+
+
+class HomecenterSourceAdapter(FalabellaSourceAdapter):
+    """Source adapter for homecenter.falabella.com.co (Sodimac/Homecenter,
+    a home-improvement retailer in the Falabella corporate group) — same
+    platform, same JSON shape, confirmed live 2026-09-25 (see module
+    docstring)."""
+
+    source_label = "Homecenter"
+
+    def __init__(
+        self,
+        base_url: str = "https://homecenter.falabella.com.co",
+        timeout: float = DEFAULT_TIMEOUT,
+        transport: httpx.BaseTransport | None = None,
+        path_prefix: str = "homecenter-co",
+    ) -> None:
+        super().__init__(
+            base_url=base_url, timeout=timeout, transport=transport, path_prefix=path_prefix
+        )

@@ -35,7 +35,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from backend.app.core.config import get_settings  # noqa: E402
 from backend.app.core.database import SessionLocal, init_db  # noqa: E402
 from backend.app.core.logging import get_logger  # noqa: E402
-from backend.app.integrations.falabella_source import FalabellaSourceAdapter  # noqa: E402
+from backend.app.integrations.base import SourceAdapter  # noqa: E402
+from backend.app.integrations.falabella_source import (  # noqa: E402
+    FalabellaSourceAdapter,
+    HomecenterSourceAdapter,
+)
+from backend.app.integrations.imusa_source import ImusaSourceAdapter  # noqa: E402
 from backend.app.integrations.mercadolibre import MercadoLibreAdapter  # noqa: E402
 from backend.app.jobs.discovery import build_opportunity_inputs  # noqa: E402
 from backend.app.models.marketplace import ListingStatus, MarketplaceProduct  # noqa: E402
@@ -51,8 +56,10 @@ logger = get_logger(__name__)
 DOMESTIC_SHIPPING_COST_COP = Decimal("15000")
 
 # Source name -> adapter factory, mirrors publish_approved_opportunities.py.
-SUPPORTED_SOURCES: dict[str, type[FalabellaSourceAdapter]] = {
+SUPPORTED_SOURCES: dict[str, type[SourceAdapter]] = {
     "Falabella Colombia": FalabellaSourceAdapter,
+    "Homecenter Colombia": HomecenterSourceAdapter,
+    "Imusa Colombia": ImusaSourceAdapter,
 }
 
 # Reclassifying below these statuses means the listing is no longer worth

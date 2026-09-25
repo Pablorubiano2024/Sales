@@ -54,12 +54,6 @@ class DummyJsonSourceAdapter(SourceAdapter):
     def close(self) -> None:
         self._client.close()
 
-    def __enter__(self) -> DummyJsonSourceAdapter:
-        return self
-
-    def __exit__(self, *exc_info: object) -> None:
-        self.close()
-
     def _parse_product(self, item: dict[str, Any]) -> SourceProductInfo | None:
         try:
             price = Decimal(str(item["price"]))

@@ -49,6 +49,10 @@ class DropiAdapter(SourceAdapter):
     def __init__(self) -> None:
         self._settings = get_settings()
 
+    def close(self) -> None:
+        """No real resources held yet — no HTTP client built until the
+        real API is implemented (see module docstring)."""
+
     def is_configured(self) -> bool:
         return bool(self._settings.dropi_integration_key)
 

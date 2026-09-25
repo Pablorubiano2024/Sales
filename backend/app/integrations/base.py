@@ -63,7 +63,21 @@ class SourceProductInfo:
 
 
 class SourceAdapter(ABC):
-    """Interface every supplier/source integration must implement."""
+    """Interface every supplier/source integration must implement. Every
+    concrete adapter is used as a context manager (`with AdapterCls() as
+    adapter: ...`) to release its HTTP client — declared here (`close` as
+    abstract, `__enter__`/`__exit__` concrete) so callers can type against
+    `SourceAdapter` itself instead of each concrete subclass."""
+
+    @abstractmethod
+    def close(self) -> None:
+        """Release any held resources (e.g. an HTTP client)."""
+
+    def __enter__(self) -> SourceAdapter:
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self.close()
 
     @abstractmethod
     def search_products(self, query: str, limit: int = 20) -> list[SourceProductInfo]:

@@ -31,7 +31,11 @@ import httpx  # noqa: E402
 
 from backend.app.core.database import SessionLocal, init_db  # noqa: E402
 from backend.app.core.logging import get_logger  # noqa: E402
-from backend.app.integrations.falabella_source import FalabellaSourceAdapter  # noqa: E402
+from backend.app.integrations.falabella_source import (  # noqa: E402
+    FalabellaSourceAdapter,
+    HomecenterSourceAdapter,
+)
+from backend.app.integrations.imusa_source import ImusaSourceAdapter  # noqa: E402
 from backend.app.integrations.mercadolibre import MercadoLibreAdapter  # noqa: E402
 from backend.app.models.marketplace import MarketplaceProduct  # noqa: E402
 from backend.app.models.source import SourceProduct  # noqa: E402
@@ -39,7 +43,11 @@ from backend.app.services import category_lookup  # noqa: E402
 
 logger = get_logger(__name__)
 
-SUPPORTED_SOURCE_PREFIXES = {"FAL": FalabellaSourceAdapter}
+SUPPORTED_SOURCE_PREFIXES = {
+    "FAL": FalabellaSourceAdapter,
+    "HOM": HomecenterSourceAdapter,
+    "IMU": ImusaSourceAdapter,
+}
 
 
 def _extract_model(specifications: tuple[tuple[str, str], ...]) -> str | None:

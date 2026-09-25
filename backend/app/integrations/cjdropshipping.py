@@ -107,12 +107,6 @@ class CJDropshippingAdapter(SourceAdapter):
     def close(self) -> None:
         self._client.close()
 
-    def __enter__(self) -> CJDropshippingAdapter:
-        return self
-
-    def __exit__(self, *exc_info: object) -> None:
-        self.close()
-
     def is_configured(self) -> bool:
         return bool(self._api_key)
 

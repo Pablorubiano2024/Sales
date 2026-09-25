@@ -63,6 +63,9 @@ class MockSourceAdapter(SourceAdapter):
     def __init__(self, catalog: dict[str, SourceProductInfo] | None = None) -> None:
         self._catalog = catalog if catalog is not None else _MOCK_CATALOG
 
+    def close(self) -> None:
+        """No real resources to release — in-memory catalog only."""
+
     def search_products(self, query: str, limit: int = 20) -> list[SourceProductInfo]:
         query_lower = query.lower()
         matches = [item for item in self._catalog.values() if query_lower in item.name.lower()]

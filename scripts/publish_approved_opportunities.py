@@ -50,7 +50,12 @@ import httpx  # noqa: E402
 
 from backend.app.core.database import SessionLocal, init_db  # noqa: E402
 from backend.app.core.logging import get_logger  # noqa: E402
-from backend.app.integrations.falabella_source import FalabellaSourceAdapter  # noqa: E402
+from backend.app.integrations.base import SourceAdapter  # noqa: E402
+from backend.app.integrations.falabella_source import (  # noqa: E402
+    FalabellaSourceAdapter,
+    HomecenterSourceAdapter,
+)
+from backend.app.integrations.imusa_source import ImusaSourceAdapter  # noqa: E402
 from backend.app.integrations.mercadolibre import MercadoLibreAdapter  # noqa: E402
 from backend.app.models.marketplace import ListingStatus, Marketplace  # noqa: E402
 from backend.app.models.opportunity import Opportunity, OpportunityStatus  # noqa: E402
@@ -70,8 +75,10 @@ MAX_RATE_LIMIT_RETRIES = 3
 # can be safely mass-published — CJ's wholesale-arbitrage opportunities
 # use an estimated (not verified) sell price, so they're deliberately
 # excluded until that's addressed.
-SUPPORTED_SOURCES: dict[str, type[FalabellaSourceAdapter]] = {
+SUPPORTED_SOURCES: dict[str, type[SourceAdapter]] = {
     "Falabella Colombia": FalabellaSourceAdapter,
+    "Homecenter Colombia": HomecenterSourceAdapter,
+    "Imusa Colombia": ImusaSourceAdapter,
 }
 
 

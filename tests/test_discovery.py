@@ -22,6 +22,9 @@ from backend.app.models.source import Source, SourceType
 class _FakeUsdAdapter(SourceAdapter):
     """Returns one fixed USD-priced product, regardless of query."""
 
+    def close(self) -> None:
+        pass
+
     def search_products(self, query: str, limit: int = 20) -> list[SourceProductInfo]:
         return [
             SourceProductInfo(
@@ -50,6 +53,9 @@ class _FakeUsdAdapter(SourceAdapter):
 class _FakeRetailAdapter(SourceAdapter):
     """Returns one COP-priced product with a real reference/list price —
     e.g. Falabella's crossed-out "normal price" next to a discounted one."""
+
+    def close(self) -> None:
+        pass
 
     def search_products(self, query: str, limit: int = 20) -> list[SourceProductInfo]:
         return [
