@@ -1,0 +1,59 @@
+name: Discover opportunities
+
+# Runs every real retail-arbitrage discovery script daily, before publish
+# (publish-marketplace-listings.yml, 06:30) and sync (sync-marketplace-
+# listings.yml, 07:00) — keeps the "approved" pool that daily publishing
+# draws from from running dry. Each source runs as its own step with
+# `continue-on-error: true` so one source having a bad day (a site
+# hiccup, a schema change) doesn't block the others.
+#
+# CJdropshipping is deliberately NOT included here: its opportunities use
+# an estimated (not verified) sell price, so they're excluded from the
+# automated mass-publish flow (see publish_approved_opportunities.py's
+# SUPPORTED_SOURCES) — no point auto-discovering what won't get published.
+#
+# Requires the same repo secrets as the other two workflows (Settings ->
+# Secrets and variables -> Actions): DATABASE_URL, ML_CLIENT_ID,
+# ML_CLIENT_SECRET, ML_REDIRECT_URI — discovery itself doesn't call
+# MercadoLibre, but backend.app.core.config.Settings loads them all
+# together and a startup failure on a missing one would block everything.
+
+on:
+  schedule:
+    # 06:00 America/Bogota (UTC-5) daily — before publish (06:30) and sync (07:00).
+    - cron: "0 11 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Poetry
+        run: pipx install poetry
+
+      - name: Install dependencies
+        run: poetry install --no-root --only main
+
+      - name: Discover Falabella
+        continue-on-error: true
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: poetry run python scripts/discover_falabella.py
+
+      - name: Discover Homecenter
+        continue-on-error: true
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: poetry run python scripts/discover_homecenter.py
+
+      - name: Discover Imusa
+        continue-on-error: true
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: poetry run python scripts/discover_imusa.py
