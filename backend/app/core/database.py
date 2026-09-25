@@ -27,7 +27,19 @@ _connect_args = (
     # 2026-09-25: a GitHub Actions discovery run hung 20+ minutes with no
     # error on its very first DB write, while the same script ran normally
     # (a few seconds to connect) from local dev.
-    else {"connect_timeout": 10}
+    #
+    # A short value matters more than it looks here: Neon's hostname
+    # resolves to 3 IPv6 addresses *and* 3 IPv4 ones, and confirmed live
+    # the same day that this machine's IPv6 route to at least one of them
+    # is dead ("No route to host") while IPv4 connects in ~0.1s. libpq
+    # tries resolved addresses in order and applies `connect_timeout` per
+    # address, so with a 10s timeout, exhausting a couple of broken IPv6
+    # addresses before reaching a working IPv4 one reproduced the exact
+    # ~30-33s-per-connection delay pattern seen in a hung local run. A
+    # tighter bound caps that worst case without disabling IPv6 outright
+    # (environments with real IPv6 connectivity, e.g. GitHub Actions
+    # runners, keep using it — this doesn't force IPv4-only).
+    else {"connect_timeout": 5}
 )
 
 engine = create_engine(
