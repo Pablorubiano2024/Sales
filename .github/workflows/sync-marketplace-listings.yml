@@ -14,8 +14,16 @@ name: Sync MercadoLibre listings
 
 on:
   schedule:
-    # 07:00 America/Bogota (UTC-5) daily.
-    - cron: "0 12 * * *"
+    # Target real fire time: 07:00 America/Bogota (12:00 UTC). Scheduled
+    # for 07:30 UTC instead — confirmed live 2026-09-26 across 3 separate
+    # days that this repo's scheduled runs fire a consistent ~4.5h late
+    # (this workflow fired at ~16:40 UTC each time against this same
+    # 12:00 UTC config, never closer). Real GitHub Actions behavior, not
+    # a bug here — scheduled runs have no delay SLA and queue behind
+    # other triggers, worse for low-traffic repos. Scheduling ~4.5h
+    # earlier aims the actual run at ~12:00 UTC, after discover and
+    # publish. Revisit if the delay pattern changes.
+    - cron: "30 7 * * *"
   workflow_dispatch: {}
 
 jobs:

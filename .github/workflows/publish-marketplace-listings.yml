@@ -19,13 +19,17 @@ name: Publish approved opportunities
 # This is a real, consequential job — every run can create genuine public
 # MercadoLibre listings under the connected seller account. It does NOT
 # run discovery first, so it only draws from whatever Opportunities are
-# already "approved" in the database; pair it with periodically re-running
-# a discover_*.py script (still manual) to keep that pool from running dry.
+# already "approved" in the database — discover-opportunities.yml runs
+# before this one to keep that pool from running dry.
 
 on:
   schedule:
-    # 06:30 America/Bogota (UTC-5) daily — before the 07:00 sync run.
-    - cron: "30 11 * * *"
+    # Target real fire time: 06:30 America/Bogota (11:30 UTC). Scheduled
+    # for 07:00 UTC instead — same ~4.5h scheduled-run delay documented
+    # in discover-opportunities.yml's cron comment, confirmed live
+    # 2026-09-26. Still runs after discover (06:30 UTC cron) and before
+    # sync (07:30 UTC cron) in real fire order.
+    - cron: "0 7 * * *"
   workflow_dispatch: {}
 
 jobs:

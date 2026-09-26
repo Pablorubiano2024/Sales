@@ -1,9 +1,9 @@
 name: Discover opportunities
 
 # Runs every real retail-arbitrage discovery script daily, before publish
-# (publish-marketplace-listings.yml, 06:30) and sync (sync-marketplace-
-# listings.yml, 07:00) — keeps the "approved" pool that daily publishing
-# draws from from running dry. Each source runs as its own step with
+# (publish-marketplace-listings.yml) and sync (sync-marketplace-
+# listings.yml) — keeps the "approved" pool that daily publishing draws
+# from from running dry. Each source runs as its own step with
 # `continue-on-error: true` so one source having a bad day (a site
 # hiccup, a schema change) doesn't block the others.
 #
@@ -20,8 +20,16 @@ name: Discover opportunities
 
 on:
   schedule:
-    # 06:00 America/Bogota (UTC-5) daily — before publish (06:30) and sync (07:00).
-    - cron: "0 11 * * *"
+    # Target real fire time: 06:00 America/Bogota (11:00 UTC). Scheduled
+    # for 06:30 UTC instead — confirmed live 2026-09-26 that this repo's
+    # scheduled runs fire a consistent ~4.5h late (sync-marketplace-
+    # listings.yml fired at ~16:40 UTC on 3 separate days against its
+    # configured 12:00 UTC, never closer). This is real GitHub Actions
+    # behavior, not a bug here: scheduled runs queue behind other
+    # triggers with no SLA, worse for low-traffic repos. Scheduling
+    # ~4.5h earlier than desired aims the actual run at ~11:00 UTC —
+    # still before publish and sync. Revisit if the delay pattern changes.
+    - cron: "30 6 * * *"
   workflow_dispatch: {}
 
 jobs:
