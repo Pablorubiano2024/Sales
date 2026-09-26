@@ -1,16 +1,19 @@
-"""Real source adapter for imusa.com.co — Imusa's own direct-sale online
-store, not just a brand that appears on other retailers' catalogs. Unlike
-the Falabella-group sites (server-embedded page JSON), this is a classic
-VTEX commerce site with a real, documented REST search API.
+"""Real source adapter for classic-VTEX commerce sites with a real,
+documented REST search API — imusa.com.co (Imusa's own direct-sale store)
+by default, jumbocolombia.com (`JumboSourceAdapter`) as a second confirmed
+site sharing this exact API. Unlike the Falabella-group sites (server-
+embedded page JSON), this is VTEX's classic REST search API.
 
-Checked before writing this (2026-09-25):
-  - robots.txt (imusa.com.co/robots.txt) EXPLICITLY allows
-    `/api/catalog_system/` and `/*graphql` (and explicitly lists
-    ClaudeBot/Claude-User as allowed user agents) — a real, deliberate
-    grant, not just an absence of a disallow rule. Éxito (exito.com) runs
-    the same VTEX platform but its robots.txt explicitly DISALLOWS
-    `/api/` — checked the same day — so this adapter/pattern must never
-    be pointed at exito.com.
+Checked before writing this (Imusa 2026-09-25, Jumbo added same day):
+  - robots.txt: imusa.com.co EXPLICITLY allows `/api/catalog_system/` and
+    `/*graphql` (and explicitly lists ClaudeBot/Claude-User as allowed
+    user agents) — a real, deliberate grant. jumbocolombia.com's
+    robots.txt has no `/api/` rule at all (silent, not an explicit
+    grant like Imusa's, but also not a denial) under a generally
+    permissive default — real product data confirmed reachable the same
+    way. Éxito (exito.com) runs the same VTEX platform but its robots.txt
+    explicitly DISALLOWS `/api/` — checked the same day — so this
+    adapter/pattern must never be pointed at exito.com.
   - GET /api/catalog_system/pub/products/search/{query}?_from=0&_to={N}
       -> list of VTEX product dicts: {productId, productName, brand, link,
          allSpecifications: [names...], items: [{images: [{imageUrl}],
@@ -48,8 +51,18 @@ DEFAULT_HEADERS = {
 
 # Real spec fields VTEX returns alongside genuine product characteristics
 # but that aren't real characteristics themselves (marketing copy blocks,
-# an embedded HTML asset URL) — dropped rather than surfaced as "specs".
-_NON_SPEC_FIELDS = {"ShortList", "Html"}
+# an embedded HTML asset URL, or — confirmed live on Jumbo 2026-09-25 —
+# internal metadata fields whose "value" is a serialized JSON blob, not
+# human-readable text) — dropped rather than surfaced as "specs".
+_NON_SPEC_FIELDS = {"ShortList", "Html", "ProductData", "SkuData"}
+# A real spec value is short, human-readable text — a serialized JSON
+# blob (Jumbo's ProductData/SkuData) or anything implausibly long is
+# never a genuine characteristic, regardless of field name.
+_MAX_SPEC_VALUE_LENGTH = 200
+
+
+def _is_plain_spec_value(value: str) -> bool:
+    return len(value) <= _MAX_SPEC_VALUE_LENGTH and not value.lstrip().startswith(("{", "["))
 
 
 def _to_decimal(value: Any) -> Decimal | None:
@@ -63,7 +76,13 @@ def _to_decimal(value: Any) -> Decimal | None:
 
 class ImusaSourceAdapter(SourceAdapter):
     """Source adapter for imusa.com.co's real, robots.txt-permitted VTEX
-    product search API."""
+    product search API. `base_url` defaults to Imusa itself; subclasses
+    (e.g. `JumboSourceAdapter`) or direct callers can point this at any
+    confirmed sibling VTEX site sharing this exact classic search API."""
+
+    #: Used only in log messages — cosmetic, but a message that always
+    #: says "Imusa" regardless of which real site failed would mislead.
+    source_label = "Imusa"
 
     def __init__(
         self,
@@ -90,7 +109,11 @@ class ImusaSourceAdapter(SourceAdapter):
 
         price = _to_decimal(offer.get("Price"))
         if price is None:
-            logger.warning("Imusa product %s has no parseable Price; skipping", p.get("productId"))
+            logger.warning(
+                "%s product %s has no parseable Price; skipping",
+                self.source_label,
+                p.get("productId"),
+            )
             return None
 
         list_price = _to_decimal(offer.get("ListPrice"))
@@ -101,11 +124,16 @@ class ImusaSourceAdapter(SourceAdapter):
         )
         image_urls = tuple(img["imageUrl"] for img in item.get("images", []) if img.get("imageUrl"))
 
-        specifications = tuple(
-            (name, ", ".join(str(v) for v in values))
-            for name in p.get("allSpecifications") or []
-            if name not in _NON_SPEC_FIELDS and (values := p.get(name))
-        )
+        specifications = []
+        for name in p.get("allSpecifications") or []:
+            if name in _NON_SPEC_FIELDS:
+                continue
+            values = p.get(name)
+            if not values:
+                continue
+            value = ", ".join(str(v) for v in values)
+            if _is_plain_spec_value(value):
+                specifications.append((name, value))
 
         return SourceProductInfo(
             external_id=str(p["productId"]),
@@ -118,7 +146,7 @@ class ImusaSourceAdapter(SourceAdapter):
             reference_price=reference_price,
             image_urls=image_urls,
             brand=p.get("brand") or None,
-            specifications=specifications,
+            specifications=tuple(specifications),
         )
 
     def _search(self, params: dict[str, str], limit: int = 20) -> list[SourceProductInfo]:
@@ -129,13 +157,13 @@ class ImusaSourceAdapter(SourceAdapter):
             )
             response.raise_for_status()
         except httpx.HTTPError as exc:
-            logger.warning("Imusa search failed (%r): %s", params, exc)
+            logger.warning("%s search failed (%r): %s", self.source_label, params, exc)
             return []
 
         try:
             results = response.json()
         except ValueError:
-            logger.warning("Imusa search (%r): response wasn't valid JSON", params)
+            logger.warning("%s search (%r): response wasn't valid JSON", self.source_label, params)
             return []
 
         products = [self._parse_product(p) for p in results]
@@ -149,13 +177,15 @@ class ImusaSourceAdapter(SourceAdapter):
             )
             response.raise_for_status()
         except httpx.HTTPError as exc:
-            logger.warning("Imusa search_products(%r) failed: %s", query, exc)
+            logger.warning("%s search_products(%r) failed: %s", self.source_label, query, exc)
             return []
 
         try:
             results = response.json()
         except ValueError:
-            logger.warning("Imusa search_products(%r): response wasn't valid JSON", query)
+            logger.warning(
+                "%s search_products(%r): response wasn't valid JSON", self.source_label, query
+            )
             return []
 
         products = [self._parse_product(p) for p in results]
@@ -176,3 +206,18 @@ class ImusaSourceAdapter(SourceAdapter):
     def get_product_url(self, external_id: str) -> str | None:
         product = self.get_product(external_id)
         return product.url if product else None
+
+
+class JumboSourceAdapter(ImusaSourceAdapter):
+    """Source adapter for jumbocolombia.com — same classic VTEX search API
+    as Imusa, confirmed live 2026-09-25 (see module docstring)."""
+
+    source_label = "Jumbo"
+
+    def __init__(
+        self,
+        base_url: str = "https://www.jumbocolombia.com",
+        timeout: float = DEFAULT_TIMEOUT,
+        transport: httpx.BaseTransport | None = None,
+    ) -> None:
+        super().__init__(base_url=base_url, timeout=timeout, transport=transport)

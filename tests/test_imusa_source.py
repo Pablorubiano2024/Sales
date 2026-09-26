@@ -1,6 +1,7 @@
-"""Tests for the Imusa source adapter (imusa.com.co) — a classic VTEX
-commerce API, real response shape verified live 2026-09-25 (see module
-docstring). Uses httpx.MockTransport — no real network access."""
+"""Tests for the Imusa/Jumbo source adapters (imusa.com.co,
+jumbocolombia.com) — a classic VTEX commerce API, real response shape
+verified live 2026-09-25 (see module docstring). Uses httpx.MockTransport
+— no real network access."""
 
 from __future__ import annotations
 
@@ -8,7 +9,7 @@ from decimal import Decimal
 
 import httpx
 
-from backend.app.integrations.imusa_source import ImusaSourceAdapter
+from backend.app.integrations.imusa_source import ImusaSourceAdapter, JumboSourceAdapter
 
 PRODUCT = {
     "productId": "1585",
@@ -172,3 +173,31 @@ def test_get_product_url_delegates_to_get_product() -> None:
 
     with _adapter(handler) as adapter:
         assert adapter.get_product_url("1585") == PRODUCT["link"]
+
+
+def test_specifications_drop_serialized_json_blob_values() -> None:
+    """Confirmed live on Jumbo 2026-09-25: some fields (ProductData,
+    SkuData) are internal metadata whose "value" is a serialized JSON
+    blob, not human-readable text — must never be surfaced as a spec,
+    regardless of field name."""
+    jumbo_like = {
+        **PRODUCT,
+        "allSpecifications": ["Vendido por", "ProductData", "SkuData"],
+        "Vendido por": ["Jumbo"],
+        "ProductData": ['{"allow_notes":true,"brandName":"TASTY"}'],
+        "SkuData": ['{"331069":{"ref_id":"3640749"}}'],
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(206, json=[jumbo_like])
+
+    with _adapter(handler) as adapter:
+        product = adapter.search_products("licuadora")[0]
+
+    assert product.specifications == (("Vendido por", "Jumbo"),)
+
+
+def test_jumbo_adapter_defaults_to_the_real_jumbo_base_url() -> None:
+    adapter = JumboSourceAdapter(transport=httpx.MockTransport(lambda r: httpx.Response(500)))
+    assert str(adapter._client.base_url) == "https://www.jumbocolombia.com"  # noqa: SLF001
+    assert adapter.source_label == "Jumbo"

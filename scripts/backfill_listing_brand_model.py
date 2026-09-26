@@ -35,7 +35,10 @@ from backend.app.integrations.falabella_source import (  # noqa: E402
     FalabellaSourceAdapter,
     HomecenterSourceAdapter,
 )
-from backend.app.integrations.imusa_source import ImusaSourceAdapter  # noqa: E402
+from backend.app.integrations.imusa_source import (  # noqa: E402
+    ImusaSourceAdapter,
+    JumboSourceAdapter,
+)
 from backend.app.integrations.mercadolibre import MercadoLibreAdapter  # noqa: E402
 from backend.app.models.marketplace import MarketplaceProduct  # noqa: E402
 from backend.app.models.source import SourceProduct  # noqa: E402
@@ -47,6 +50,7 @@ SUPPORTED_SOURCE_PREFIXES = {
     "FAL": FalabellaSourceAdapter,
     "HOM": HomecenterSourceAdapter,
     "IMU": ImusaSourceAdapter,
+    "JUM": JumboSourceAdapter,
 }
 
 

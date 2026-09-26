@@ -69,7 +69,10 @@ from backend.app.integrations.falabella_source import (  # noqa: E402
     FalabellaSourceAdapter,
     HomecenterSourceAdapter,
 )
-from backend.app.integrations.imusa_source import ImusaSourceAdapter  # noqa: E402
+from backend.app.integrations.imusa_source import (  # noqa: E402
+    ImusaSourceAdapter,
+    JumboSourceAdapter,
+)
 from backend.app.integrations.mercadolibre import MercadoLibreAdapter  # noqa: E402
 from backend.app.models.marketplace import ListingStatus, Marketplace  # noqa: E402
 from backend.app.models.opportunity import Opportunity, OpportunityStatus  # noqa: E402
@@ -104,6 +107,7 @@ SUPPORTED_SOURCES: dict[str, type[SourceAdapter]] = {
     "Falabella Colombia": FalabellaSourceAdapter,
     "Homecenter Colombia": HomecenterSourceAdapter,
     "Imusa Colombia": ImusaSourceAdapter,
+    "Jumbo Colombia": JumboSourceAdapter,
 }
 
 
