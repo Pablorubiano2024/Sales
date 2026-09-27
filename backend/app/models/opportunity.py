@@ -9,13 +9,15 @@ from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Numeric, String, Text
+from sqlalchemy import DateTime, Enum, ForeignKey, Integer, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.app.core.database import Base
 from backend.app.core.time import utcnow
+from backend.app.models.lifecycle import LifecycleStage
 
 if TYPE_CHECKING:
+    from backend.app.models.lifecycle import OpportunityLifecycleEvent
     from backend.app.models.product import Product
 
 
@@ -66,10 +68,26 @@ class Opportunity(Base):
     )
     ai_analysis: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # --- Lifecycle (funnel stage) — a separate dimension from `status`
+    # above ("is this profitable?"). See models/lifecycle.py. ---
+    lifecycle_stage: Mapped[LifecycleStage] = mapped_column(
+        Enum(LifecycleStage), default=LifecycleStage.FOUND, index=True
+    )
+
+    # --- Confidence Engine — deterministic, explainable score (never a
+    # black-box model). `confidence_breakdown` is a JSON-encoded list of
+    # {label, points, reasoning}, same "Text holding real JSON" convention
+    # `ai_analysis` above already uses. ---
+    confidence_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    confidence_breakdown: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
     product: Mapped[Product] = relationship(back_populates="opportunities")
+    lifecycle_events: Mapped[list[OpportunityLifecycleEvent]] = relationship(
+        back_populates="opportunity", cascade="all, delete-orphan"
+    )
 
     def __repr__(self) -> str:  # pragma: no cover
         return f"<Opportunity product={self.product_id} status={self.status.value} roi={self.roi}>"
