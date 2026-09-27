@@ -24,6 +24,7 @@ inject_base_styles()
 pages = [
     st.Page("views/inicio.py", title="Inicio", icon="📦", default=True),
     st.Page("views/oportunidades.py", title="Oportunidades", icon="📈"),
+    st.Page("views/autopilot.py", title="Autopilot", icon="🤖"),
     st.Page("views/productos.py", title="Productos", icon="🛒"),
     st.Page("views/ordenes.py", title="Órdenes", icon="📦"),
     st.Page("views/marketplaces.py", title="Marketplaces", icon="🏪"),

@@ -64,27 +64,23 @@ import httpx  # noqa: E402
 
 from backend.app.core.database import SessionLocal, init_db  # noqa: E402
 from backend.app.core.logging import get_logger  # noqa: E402
-from backend.app.integrations.base import SourceAdapter  # noqa: E402
-from backend.app.integrations.falabella_source import (  # noqa: E402
-    FalabellaSourceAdapter,
-    HomecenterSourceAdapter,
-)
-from backend.app.integrations.imusa_source import (  # noqa: E402
-    ImusaSourceAdapter,
-    JumboSourceAdapter,
-)
 from backend.app.integrations.mercadolibre import MercadoLibreAdapter  # noqa: E402
 from backend.app.models.marketplace import ListingStatus, Marketplace  # noqa: E402
 from backend.app.models.opportunity import Opportunity, OpportunityStatus  # noqa: E402
-from backend.app.models.source import Source, SourceProduct  # noqa: E402
 from backend.app.schemas.opportunity import OpportunityCreate  # noqa: E402
 from backend.app.services import category_lookup, listing_service  # noqa: E402
 from backend.app.services.arbitrage_engine import evaluate_opportunity  # noqa: E402
+from backend.app.services.listing_draft_service import (  # noqa: E402
+    MAX_PICTURES,
+    DraftGenerationError,
+    extract_model,
+    fetch_live_source_data,
+    truncate_title,
+)
+from backend.app.services.opportunity_validator import validate_opportunity  # noqa: E402
 
 logger = get_logger(__name__)
 
-MAX_TITLE_LENGTH = 60  # MercadoLibre item title limit.
-MAX_PICTURES = 6
 # "Free" (Gratuita) has a real, scarce quota shared across ALL free
 # listings the account holds at once (confirmed live 2026-09-25: it
 # dropped from 10 to 1 after publishing 10 real items and never
@@ -98,33 +94,6 @@ LISTING_TYPE_ID = "gold_special"
 # confirmed live 2026-09-22, see the retry loop below.
 RATE_LIMIT_BACKOFF_SECONDS = 30
 MAX_RATE_LIMIT_RETRIES = 3
-
-# Source name -> adapter factory. Only sources with a real, live adapter
-# can be safely mass-published — CJ's wholesale-arbitrage opportunities
-# use an estimated (not verified) sell price, so they're deliberately
-# excluded until that's addressed.
-SUPPORTED_SOURCES: dict[str, type[SourceAdapter]] = {
-    "Falabella Colombia": FalabellaSourceAdapter,
-    "Homecenter Colombia": HomecenterSourceAdapter,
-    "Imusa Colombia": ImusaSourceAdapter,
-    "Jumbo Colombia": JumboSourceAdapter,
-}
-
-
-def _truncate_title(name: str) -> str:
-    return name if len(name) <= MAX_TITLE_LENGTH else name[: MAX_TITLE_LENGTH - 1].rstrip() + "…"
-
-
-def _extract_model(specifications: tuple[tuple[str, str], ...]) -> str | None:
-    """Real model number/name from the source's own spec table (e.g.
-    Falabella's "Modelo": "SM L320NZSALTA"), instead of the "Genérico"
-    placeholder — publishing a real branded product (Samsung, Xiaomi, ...)
-    with a generic brand/model hurt MercadoLibre's quality score,
-    confirmed live 2026-09-22."""
-    for name, value in specifications:
-        if name.strip().lower() == "modelo":
-            return value
-    return None
 
 
 def main() -> None:
@@ -170,33 +139,12 @@ def main() -> None:
                     skipped += 1
                     continue
 
-                source = db.get(Source, opp.source_id)
-                adapter_cls = SUPPORTED_SOURCES.get(source.name if source else "")
-                if adapter_cls is None:
-                    print(f"SKIP  {label}: fuente '{source.name if source else '?'}' no soportada")
+                live_or_error = fetch_live_source_data(db, opp)
+                if isinstance(live_or_error, DraftGenerationError):
+                    print(f"SKIP  {label}: {live_or_error.reason}")
                     skipped += 1
                     continue
-
-                source_product = (
-                    db.query(SourceProduct)
-                    .filter_by(source_id=opp.source_id, product_id=product.id)
-                    .first()
-                )
-                if source_product is None or not source_product.external_id:
-                    print(f"SKIP  {label}: sin SourceProduct.external_id")
-                    skipped += 1
-                    continue
-
-                with adapter_cls() as source_adapter:
-                    live = source_adapter.get_product(source_product.external_id)
-                if live is None or not live.stock_available:
-                    print(f"SKIP  {label}: ya no disponible en la fuente")
-                    skipped += 1
-                    continue
-                if not live.image_urls:
-                    print(f"SKIP  {label}: sin foto real disponible")
-                    skipped += 1
-                    continue
+                live = live_or_error
 
                 # Falabella's search-result name (what discovery stores on
                 # Product.name) and its detail-page name can genuinely
@@ -223,10 +171,10 @@ def main() -> None:
                     skipped += 1
                     continue
 
-                title = _truncate_title(product.name)
+                title = truncate_title(product.name)
                 pictures = list(live.image_urls[:MAX_PICTURES])
                 brand = live.brand or product.brand or "Genérica"
-                model = _extract_model(live.specifications) or "Genérico"
+                model = extract_model(live.specifications) or "Genérico"
                 extra_attributes = category_lookup.match_specifications(
                     category_id, live.specifications, client=ml_public_client
                 )
@@ -276,6 +224,20 @@ def main() -> None:
                         "usando el estimado de Settings.marketplace_commission_pct",
                         category_id,
                     )
+
+                # Autopilot Phase 1 gate — margin/score/seller_count/stock
+                # rules the user asked for, on top of the checks above
+                # (which already re-verify stock and the real commission).
+                # Reuses the live stock/price this loop already fetched
+                # instead of re-querying the source a second time.
+                validation = validate_opportunity(
+                    db, opp, live_stock_available=live.stock_available, live_price_cop=live.price
+                )
+                if not validation.overall_passed:
+                    reasons = "; ".join(c.detail for c in validation.failed_checks)
+                    print(f"SKIP  {label}: no pasó el Opportunity Validator ({reasons})")
+                    skipped += 1
+                    continue
 
                 if not confirm:
                     print(

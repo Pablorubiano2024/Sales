@@ -98,3 +98,30 @@ def get_marketplaces() -> list[dict]:
 
 def get_mercadolibre_status() -> dict:
     return _request("GET", "/api/marketplaces/mercadolibre/status")
+
+
+# --- Autopilot (Phases 1-3) ---
+
+
+def validate_opportunity(opportunity_id: str, *, refresh_live: bool = False) -> dict:
+    return _request(
+        "GET",
+        f"/api/opportunities/{opportunity_id}/validate",
+        params={"refresh_live": refresh_live},
+    )
+
+
+def get_listing_drafts(**params: Any) -> list[dict]:
+    return _request("GET", "/api/listing-drafts", params=params)
+
+
+def generate_listing_draft(opportunity_id: str) -> dict:
+    return _request("POST", f"/api/listing-drafts/generate/{opportunity_id}")
+
+
+def approve_listing_draft(draft_id: str) -> dict:
+    return _request("POST", f"/api/listing-drafts/{draft_id}/approve")
+
+
+def reject_listing_draft(draft_id: str, reason: str) -> dict:
+    return _request("POST", f"/api/listing-drafts/{draft_id}/reject", json={"reason": reason})

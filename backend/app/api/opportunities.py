@@ -10,8 +10,12 @@ from backend.app.core.security import require_api_key
 from backend.app.models.opportunity import Opportunity, OpportunityStatus
 from backend.app.models.source import SourceProduct
 from backend.app.schemas.opportunity import OpportunityAnalyzeRequest, OpportunityRead
+from backend.app.schemas.validation import ValidationResultRead
 from backend.app.services.ai_service import enrich_opportunity_with_ai
 from backend.app.services.arbitrage_engine import evaluate_opportunity
+from backend.app.services.confidence_engine import score_opportunity
+from backend.app.services.listing_draft_service import DraftGenerationError, fetch_live_source_data
+from backend.app.services.opportunity_validator import validate_opportunity
 
 router = APIRouter(
     prefix="/api/opportunities", tags=["opportunities"], dependencies=[Depends(require_api_key)]
@@ -95,4 +99,44 @@ def analyze_opportunity(
     if payload.use_ai:
         opportunity = enrich_opportunity_with_ai(db, opportunity)
 
+    # Deterministic — always runs, independent of use_ai, so the
+    # Autopilot Confidence Score/breakdown is always fresh on this
+    # response (see confidence_engine.py for the explainable breakdown).
+    opportunity = score_opportunity(db, opportunity)
+
     return _with_source_url(db, [opportunity])[0]
+
+
+@router.get("/{opportunity_id}/validate", response_model=ValidationResultRead)
+def validate(
+    opportunity_id: str, refresh_live: bool = False, db: Session = Depends(get_db)
+) -> ValidationResultRead:
+    """Run the Opportunity Validator (Autopilot Phase 1) rules for one
+    opportunity. `refresh_live=True` re-fetches real stock/price from the
+    source first (same fetch publish_approved_opportunities.py does) —
+    otherwise stock/price checks report "not applicable" since nothing
+    live was checked."""
+    opportunity = db.get(Opportunity, opportunity_id)
+    if opportunity is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Opportunity not found")
+
+    live_stock_available = None
+    live_price_cop = None
+    if refresh_live:
+        live_or_error = fetch_live_source_data(db, opportunity)
+        if isinstance(live_or_error, DraftGenerationError):
+            live_stock_available = False
+        else:
+            live_stock_available = live_or_error.stock_available
+            live_price_cop = live_or_error.price
+
+    result = validate_opportunity(
+        db,
+        opportunity,
+        live_stock_available=live_stock_available,
+        live_price_cop=live_price_cop,
+    )
+    return ValidationResultRead(
+        checks=[{"name": c.name, "passed": c.passed, "detail": c.detail} for c in result.checks],
+        overall_passed=result.overall_passed,
+    )

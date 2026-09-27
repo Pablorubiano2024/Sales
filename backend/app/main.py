@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 
 from backend.app.api import (
     health,
+    listing_drafts,
     marketplaces,
     mercadolibre_oauth,
     opportunities,
@@ -63,3 +64,4 @@ app.include_router(sources.router)
 app.include_router(marketplaces.router)
 app.include_router(mercadolibre_oauth.router)
 app.include_router(settings.router)
+app.include_router(listing_drafts.router)

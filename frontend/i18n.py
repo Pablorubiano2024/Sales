@@ -30,6 +30,22 @@ SHIPPING_STATUS_LABELS = {
     "returned": "Devuelto",
 }
 
+LIFECYCLE_STAGE_LABELS = {
+    "found": "Encontrada",
+    "validated": "Validada",
+    "published": "Publicada",
+    "sold": "Vendida",
+    "expired": "Expirada",
+    "cancelled": "Cancelada",
+}
+
+LISTING_DRAFT_STATUS_LABELS = {
+    "draft": "Borrador",
+    "ready": "Lista para publicar",
+    "published": "Publicada",
+    "rejected": "Rechazada",
+}
+
 
 def opportunity_status_label(value: str) -> str:
     return OPPORTUNITY_STATUS_LABELS.get(value, value)
@@ -41,3 +57,11 @@ def order_status_label(value: str) -> str:
 
 def shipping_status_label(value: str) -> str:
     return SHIPPING_STATUS_LABELS.get(value, value)
+
+
+def lifecycle_stage_label(value: str) -> str:
+    return LIFECYCLE_STAGE_LABELS.get(value, value)
+
+
+def listing_draft_status_label(value: str) -> str:
+    return LISTING_DRAFT_STATUS_LABELS.get(value, value)

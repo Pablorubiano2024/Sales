@@ -1,0 +1,216 @@
+"""Tests for listing_draft_service.py (Autopilot Phase 3), using
+httpx.MockTransport for the MercadoLibre category/attribute calls — same
+pattern as tests/test_category_lookup.py."""
+
+from __future__ import annotations
+
+from decimal import Decimal
+
+import httpx
+from sqlalchemy.orm import Session
+
+from backend.app.integrations.base import SourceProductInfo
+from backend.app.models.listing_draft import ListingDraft, ListingDraftStatus
+from backend.app.models.marketplace import Marketplace
+from backend.app.models.opportunity import Opportunity, OpportunityStatus
+from backend.app.models.product import Product
+from backend.app.models.source import Source, SourceType
+from backend.app.services import category_lookup
+from backend.app.services.listing_draft_service import (
+    DraftGenerationError,
+    approve_draft,
+    extract_model,
+    generate_draft,
+    reject_draft,
+    truncate_title,
+)
+
+
+def _client(handler) -> httpx.Client:
+    return httpx.Client(
+        base_url=category_lookup.API_BASE_URL, transport=httpx.MockTransport(handler)
+    )
+
+
+def _make_opportunity(db: Session) -> Opportunity:
+    product = Product(sku="DRAFT-1", name="Freidora De Aire Holstein 9 Litros Antiadherente XL")
+    source = Source(name="Test Source", source_type=SourceType.MOCK)
+    marketplace = Marketplace(name="Test Marketplace")
+    db.add_all([product, source, marketplace])
+    db.commit()
+    db.refresh(product)
+    db.refresh(source)
+    db.refresh(marketplace)
+
+    opportunity = Opportunity(
+        product_id=product.id,
+        source_id=source.id,
+        marketplace_id=marketplace.id,
+        buy_price=Decimal("300000"),
+        sell_price=Decimal("500000"),
+        status=OpportunityStatus.APPROVED,
+    )
+    db.add(opportunity)
+    db.commit()
+    db.refresh(opportunity)
+    return opportunity
+
+
+def _live(**overrides: object) -> SourceProductInfo:
+    defaults = dict(
+        external_id="ext-1",
+        name="Freidora De Aire Holstein 9 Litros",
+        price=Decimal("300000"),
+        currency="COP",
+        stock_available=True,
+        image_urls=("https://example.com/photo.jpg",),
+        brand="Holstein",
+        specifications=(("Modelo", "HOL-AF9"), ("Capacidad", "9 Litros")),
+    )
+    defaults.update(overrides)
+    return SourceProductInfo(**defaults)  # type: ignore[arg-type]
+
+
+def _handler_safe_category(request: httpx.Request) -> httpx.Response:
+    if request.url.path == "/sites/MCO/domain_discovery/search":
+        return httpx.Response(
+            200, json=[{"category_id": "MCO456045", "category_name": "Freidoras"}]
+        )
+    if request.url.path == "/categories/MCO456045/attributes":
+        return httpx.Response(
+            200,
+            json=[
+                {"id": "BRAND", "tags": {"required": True}},
+                {"id": "MODEL", "tags": {"required": True}},
+                {
+                    "id": "CAPACITY",
+                    "name": "Capacidad",
+                    "value_type": "string",
+                    "tags": {},
+                },
+            ],
+        )
+    raise AssertionError(f"unexpected request: {request.url}")
+
+
+def test_truncate_title_leaves_short_names_untouched() -> None:
+    assert truncate_title("Freidora") == "Freidora"
+
+
+def test_truncate_title_truncates_long_names() -> None:
+    name = "x" * 100
+    result = truncate_title(name)
+    assert len(result) == 60
+    assert result.endswith("…")
+
+
+def test_extract_model_reads_modelo_spec() -> None:
+    assert extract_model((("Modelo", "HOL-AF9"), ("Color", "Negro"))) == "HOL-AF9"
+
+
+def test_extract_model_returns_none_without_modelo_spec() -> None:
+    assert extract_model((("Color", "Negro"),)) is None
+
+
+def test_generate_draft_builds_real_data_only(db_session: Session) -> None:
+    opportunity = _make_opportunity(db_session)
+    live = _live()
+
+    with _client(_handler_safe_category) as ml_public_client:
+        result = generate_draft(db_session, opportunity, live, ml_public_client=ml_public_client)
+
+    assert isinstance(result, ListingDraft)
+    assert result.status == ListingDraftStatus.DRAFT
+    assert result.category_id == "MCO456045"
+    assert result.title == truncate_title(live.name)
+    assert result.price == opportunity.sell_price
+    assert "HOL-AF9" in (result.description or "")
+    assert result.image_urls is not None and "example.com" in result.image_urls
+
+
+def test_generate_draft_returns_error_when_category_not_predicted(db_session: Session) -> None:
+    opportunity = _make_opportunity(db_session)
+    live = _live()
+
+    with _client(lambda r: httpx.Response(200, json=[])) as ml_public_client:
+        result = generate_draft(db_session, opportunity, live, ml_public_client=ml_public_client)
+
+    assert isinstance(result, DraftGenerationError)
+
+
+def test_generate_draft_returns_error_when_category_needs_unsafe_attributes(
+    db_session: Session,
+) -> None:
+    opportunity = _make_opportunity(db_session)
+    live = _live()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/sites/MCO/domain_discovery/search":
+            return httpx.Response(200, json=[{"category_id": "MCO1", "category_name": "X"}])
+        if request.url.path == "/categories/MCO1/attributes":
+            return httpx.Response(
+                200,
+                json=[
+                    {"id": "BRAND", "tags": {"required": True}},
+                    {"id": "POWER_SUPPLY_TYPE", "tags": {"required": True}},
+                ],
+            )
+        raise AssertionError(f"unexpected request: {request.url}")
+
+    with _client(handler) as ml_public_client:
+        result = generate_draft(db_session, opportunity, live, ml_public_client=ml_public_client)
+
+    assert isinstance(result, DraftGenerationError)
+
+
+def test_generate_draft_is_idempotent_per_opportunity(db_session: Session) -> None:
+    opportunity = _make_opportunity(db_session)
+    live = _live()
+
+    with _client(_handler_safe_category) as ml_public_client:
+        first = generate_draft(db_session, opportunity, live, ml_public_client=ml_public_client)
+        second = generate_draft(db_session, opportunity, live, ml_public_client=ml_public_client)
+
+    assert isinstance(first, ListingDraft) and isinstance(second, ListingDraft)
+    assert first.id == second.id
+    assert db_session.query(ListingDraft).filter_by(opportunity_id=opportunity.id).count() == 1
+
+
+def test_approve_draft_moves_to_ready(db_session: Session) -> None:
+    opportunity = _make_opportunity(db_session)
+    live = _live()
+    with _client(_handler_safe_category) as ml_public_client:
+        draft = generate_draft(db_session, opportunity, live, ml_public_client=ml_public_client)
+    assert isinstance(draft, ListingDraft)
+
+    approved = approve_draft(db_session, draft)
+    assert approved.status == ListingDraftStatus.READY
+
+
+def test_reject_draft_records_reason(db_session: Session) -> None:
+    opportunity = _make_opportunity(db_session)
+    live = _live()
+    with _client(_handler_safe_category) as ml_public_client:
+        draft = generate_draft(db_session, opportunity, live, ml_public_client=ml_public_client)
+    assert isinstance(draft, ListingDraft)
+
+    rejected = reject_draft(db_session, draft, "precio ya no es competitivo")
+    assert rejected.status == ListingDraftStatus.REJECTED
+    assert rejected.rejection_reason == "precio ya no es competitivo"
+
+
+def test_generate_draft_regenerating_a_rejected_draft_resets_status(db_session: Session) -> None:
+    opportunity = _make_opportunity(db_session)
+    live = _live()
+    with _client(_handler_safe_category) as ml_public_client:
+        draft = generate_draft(db_session, opportunity, live, ml_public_client=ml_public_client)
+        assert isinstance(draft, ListingDraft)
+        reject_draft(db_session, draft, "stock agotado")
+
+        regenerated = generate_draft(
+            db_session, opportunity, live, ml_public_client=ml_public_client
+        )
+
+    assert isinstance(regenerated, ListingDraft)
+    assert regenerated.status == ListingDraftStatus.DRAFT
+    assert regenerated.rejection_reason is None

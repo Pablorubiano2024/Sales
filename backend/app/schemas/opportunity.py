@@ -6,6 +6,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from backend.app.models.lifecycle import LifecycleStage
 from backend.app.models.opportunity import OpportunityStatus
 
 
@@ -54,6 +55,12 @@ class OpportunityRead(BaseModel):
 
     status: OpportunityStatus
     ai_analysis: str | None = None
+
+    # Autopilot — funnel stage (see models/lifecycle.py) and the
+    # Confidence Engine's explainable score (see services/confidence_engine.py).
+    lifecycle_stage: LifecycleStage
+    confidence_score: int | None = None
+    confidence_breakdown: str | None = None
 
     created_at: datetime
     updated_at: datetime
