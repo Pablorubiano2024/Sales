@@ -218,3 +218,65 @@ else:
             disabled=not source_url,
             width="stretch",
         )
+
+st.divider()
+
+st.subheader("3. Simulador de Capital")
+st.caption(
+    "Proyecta ventas potenciales, rotación de capital y ganancia mensual usando datos "
+    "reales de tus oportunidades aprobadas — no números inventados."
+)
+with st.form("capital_simulator"):
+    col_capital, col_purchases, col_margin = st.columns(3)
+    capital = col_capital.number_input(
+        "Capital disponible (COP)", min_value=0, value=5000000, step=100000
+    )
+    max_daily_purchases = col_purchases.number_input(
+        "Máximo de compras diarias", min_value=1, value=5, step=1
+    )
+    min_margin_pct = col_margin.slider("Margen mínimo (%)", 0, 100, 20, step=5)
+    submitted = st.form_submit_button("Simular")
+
+if submitted:
+    try:
+        result = api_client.simulate_capital(
+            capital=float(capital),
+            max_daily_purchases=int(max_daily_purchases),
+            min_margin=min_margin_pct / 100,
+        )
+    except api_client.ApiError as exc:
+        st.error(str(exc))
+    else:
+        if not result.get("time_to_sale_is_real_data"):
+            st.info(
+                f"⏸️ Todavía no hay ventas reales completadas — el tiempo de rotación usa un "
+                f"supuesto por defecto de {result['avg_time_to_sale_days']:.0f} días. Esto se "
+                "vuelve automáticamente un dato real en cuanto se registren ventas."
+            )
+
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Compras/día sostenibles (promedio)", f"{result['daily_purchases']:.2f}")
+        col2.metric("Ganancia mensual", f"${result['monthly_profit']:,.0f}")
+        col3.metric("ROI mensual", f"{result['monthly_roi']:.1%}")
+
+        col4, col5, col6 = st.columns(3)
+        col4.metric("Capital desplegado/día", f"${result['daily_capital_deployed']:,.0f}")
+        col5.metric("Rotaciones de capital/mes", f"{result['capital_rotations_per_month']:.1f}")
+        days_to_double = result.get("days_to_double_capital")
+        col6.metric(
+            "Días para duplicar capital",
+            f"{days_to_double:.0f}" if days_to_double is not None else "—",
+        )
+
+        if result["daily_purchases"] < 1:
+            st.caption(
+                "Menos de 1 compra/día en promedio: con este capital y esta rotación, compra "
+                "en tandas cada varios días en vez de todos los días."
+            )
+
+        st.caption(
+            f"Basado en {result['qualifying_opportunities']} oportunidades aprobadas reales con "
+            f"margen ≥ {min_margin_pct}% — precio de compra promedio "
+            f"${result['avg_buy_price']:,.0f}, margen promedio {result['avg_margin']:.1%}, "
+            f"rotación estimada {result['avg_time_to_sale_days']:.1f} días."
+        )

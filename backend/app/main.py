@@ -12,6 +12,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from backend.app.api import (
+    capital_simulation,
     health,
     listing_drafts,
     marketplaces,
@@ -65,3 +66,4 @@ app.include_router(marketplaces.router)
 app.include_router(mercadolibre_oauth.router)
 app.include_router(settings.router)
 app.include_router(listing_drafts.router)
+app.include_router(capital_simulation.router)

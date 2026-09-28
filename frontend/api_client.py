@@ -125,3 +125,18 @@ def approve_listing_draft(draft_id: str) -> dict:
 
 def reject_listing_draft(draft_id: str, reason: str) -> dict:
     return _request("POST", f"/api/listing-drafts/{draft_id}/reject", json={"reason": reason})
+
+
+# --- Autopilot (Phase 7) ---
+
+
+def simulate_capital(capital: float, max_daily_purchases: int, min_margin: float) -> dict:
+    return _request(
+        "POST",
+        "/api/capital-simulation",
+        json={
+            "capital": capital,
+            "max_daily_purchases": max_daily_purchases,
+            "min_margin": min_margin,
+        },
+    )
