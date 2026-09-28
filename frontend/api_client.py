@@ -140,3 +140,7 @@ def simulate_capital(capital: float, max_daily_purchases: int, min_margin: float
             "min_margin": min_margin,
         },
     )
+
+
+def get_analytics_summary() -> dict:
+    return _request("GET", "/api/analytics/summary")

@@ -12,8 +12,10 @@ from sqlalchemy.orm import Session
 from backend.app.integrations.base import MarketplaceOrderInfo
 from backend.app.jobs.order_sync import run_order_sync
 from backend.app.models.marketplace import Marketplace, MarketplaceProduct
+from backend.app.models.opportunity import Opportunity, OpportunityStatus
 from backend.app.models.order import Order
 from backend.app.models.product import Product
+from backend.app.models.source import Source, SourceType
 
 
 def _make_listing(db: Session, *, external_id: str) -> MarketplaceProduct:
@@ -120,3 +122,39 @@ def test_run_order_sync_does_not_duplicate_existing_orders(db_session: Session) 
 
     assert created == 0
     assert db_session.query(Order).count() == 1
+
+
+def test_run_order_sync_resolves_and_links_the_real_opportunity(db_session: Session) -> None:
+    listing = _make_listing(db_session, external_id="MCO123")
+    source = Source(name="Falabella", source_type=SourceType.MOCK)
+    db_session.add(source)
+    db_session.commit()
+    db_session.refresh(source)
+
+    opportunity = Opportunity(
+        product_id=listing.product_id,
+        source_id=source.id,
+        marketplace_id=listing.marketplace_id,
+        buy_price=Decimal("100000"),
+        sell_price=Decimal("200000"),
+        status=OpportunityStatus.APPROVED,
+    )
+    db_session.add(opportunity)
+    db_session.commit()
+
+    adapter = MagicMock()
+    adapter.get_orders.return_value = [
+        MarketplaceOrderInfo(
+            external_id="ML-4",
+            status="paid",
+            total_amount=Decimal("200000"),
+            currency="COP",
+            item_external_id="MCO123",
+            quantity=1,
+        )
+    ]
+
+    run_order_sync(db_session, adapter)
+
+    order = db_session.query(Order).filter_by(marketplace_order_id="ML-4").one()
+    assert order.opportunity_id == opportunity.id

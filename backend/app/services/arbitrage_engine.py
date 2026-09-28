@@ -8,6 +8,8 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from backend.app.core.logging import get_logger
+from backend.app.models.analytics import AnalyticsEvent, AnalyticsEventType
+from backend.app.models.lifecycle import LifecycleStage, OpportunityLifecycleEvent
 from backend.app.models.opportunity import Opportunity
 from backend.app.schemas.opportunity import OpportunityCreate
 from backend.app.services.opportunity_engine import classify_opportunity
@@ -45,6 +47,7 @@ def evaluate_opportunity(db: Session, inputs: OpportunityCreate) -> Opportunity:
         )
         .first()
     )
+    is_new = opportunity is None
     if opportunity is None:
         opportunity = Opportunity(
             product_id=inputs.product_id,
@@ -67,6 +70,27 @@ def evaluate_opportunity(db: Session, inputs: OpportunityCreate) -> Opportunity:
     opportunity.status = status
     db.commit()
     db.refresh(opportunity)
+
+    # Real lifecycle/analytics events — only on the first time this exact
+    # (product, source, marketplace) combo is ever seen, never on a
+    # re-evaluation (discovery re-runs the same product through this
+    # repeatedly; see this function's own docstring).
+    if is_new:
+        db.add(
+            OpportunityLifecycleEvent(
+                opportunity_id=opportunity.id,
+                stage=LifecycleStage.FOUND,
+                reason="Detectada por el motor de arbitraje",
+            )
+        )
+        db.add(
+            AnalyticsEvent(
+                opportunity_id=opportunity.id,
+                event_type=AnalyticsEventType.DETECTED,
+                estimated_margin=breakdown.margin,
+            )
+        )
+        db.commit()
 
     logger.info(
         "Opportunity evaluated: product=%s roi=%s net_profit=%s status=%s",

@@ -280,3 +280,47 @@ if submitted:
             f"${result['avg_buy_price']:,.0f}, margen promedio {result['avg_margin']:.1%}, "
             f"rotación estimada {result['avg_time_to_sale_days']:.1f} días."
         )
+
+st.divider()
+
+st.subheader("4. Analytics")
+st.caption(
+    "Qué tan bien está funcionando el sistema en la práctica — datos reales, nunca simulados."
+)
+try:
+    analytics = api_client.get_analytics_summary()
+except api_client.ApiError as exc:
+    st.error(str(exc))
+else:
+    a1, a2, a3, a4 = st.columns(4)
+    a1.metric("Detectadas", analytics["detected_count"])
+    a2.metric("Publicadas", analytics["published_count"])
+    a3.metric("Vendidas", analytics["sold_count"])
+    a4.metric("Expiradas", analytics["expired_count"])
+
+    if analytics["sold_count"] == 0:
+        st.info(
+            "Todavía no hay ventas reales completadas — estas métricas se llenan solas "
+            "en cuanto haya."
+        )
+    else:
+        b1, b2, b3 = st.columns(3)
+        time_to_sale = analytics.get("avg_time_to_sale_days")
+        b1.metric("Tiempo promedio a la venta", f"{time_to_sale:.1f} días" if time_to_sale else "—")
+        est_margin = analytics.get("avg_estimated_margin")
+        real_margin = analytics.get("avg_real_margin")
+        b2.metric(
+            "Margen estimado promedio", f"{est_margin:.1%}" if est_margin is not None else "—"
+        )
+        b3.metric("Margen real promedio", f"{real_margin:.1%}" if real_margin is not None else "—")
+
+    recal = analytics.get("confidence_recalibration") or {}
+    if recal.get("directionally_correct") is not None:
+        icon = "✅" if recal["directionally_correct"] else "⚠️"
+        direction = "sí" if recal["directionally_correct"] else "no"
+        st.caption(
+            f"{icon} ¿El Confidence Score predice ventas reales? {direction} — "
+            f"score promedio en ventas: {recal['avg_score_sold']:.0f}, "
+            f"en expiradas: {recal['avg_score_expired']:.0f} "
+            f"({recal['sold_count']} vendidas, {recal['expired_count']} expiradas analizadas)."
+        )

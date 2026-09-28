@@ -65,6 +65,8 @@ import httpx  # noqa: E402
 from backend.app.core.database import SessionLocal, init_db  # noqa: E402
 from backend.app.core.logging import get_logger  # noqa: E402
 from backend.app.integrations.mercadolibre import MercadoLibreAdapter  # noqa: E402
+from backend.app.models.analytics import AnalyticsEvent, AnalyticsEventType  # noqa: E402
+from backend.app.models.lifecycle import LifecycleStage, OpportunityLifecycleEvent  # noqa: E402
 from backend.app.models.marketplace import ListingStatus, Marketplace  # noqa: E402
 from backend.app.models.opportunity import Opportunity, OpportunityStatus  # noqa: E402
 from backend.app.schemas.opportunity import OpportunityCreate  # noqa: E402
@@ -288,6 +290,24 @@ def main() -> None:
                         break
                 if record is None:
                     continue
+
+                db.add(
+                    OpportunityLifecycleEvent(
+                        opportunity_id=opp.id,
+                        stage=LifecycleStage.PUBLISHED,
+                        reason=f"Publicada en MercadoLibre como {record.external_id}",
+                    )
+                )
+                db.add(
+                    AnalyticsEvent(
+                        opportunity_id=opp.id,
+                        event_type=AnalyticsEventType.PUBLISHED,
+                        estimated_margin=opp.margin,
+                        confidence_score_at_detection=opp.confidence_score,
+                    )
+                )
+                opp.lifecycle_stage = LifecycleStage.PUBLISHED
+                db.commit()
 
                 print(
                     f"PUBLICADA  {label}: {record.external_id} {record.url}\n"

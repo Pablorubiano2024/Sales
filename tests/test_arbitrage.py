@@ -7,6 +7,8 @@ from decimal import Decimal
 from sqlalchemy.orm import Session
 
 from backend.app.core.config import Settings
+from backend.app.models.analytics import AnalyticsEvent, AnalyticsEventType
+from backend.app.models.lifecycle import LifecycleStage, OpportunityLifecycleEvent
 from backend.app.models.marketplace import Marketplace
 from backend.app.models.opportunity import Opportunity, OpportunityStatus
 from backend.app.models.product import Product
@@ -146,3 +148,33 @@ def test_evaluate_opportunity_updates_existing_row_instead_of_duplicating(
         == 1
     )
     assert float(second.buy_price) == 50000.0
+
+
+def test_evaluate_opportunity_records_detected_analytics_once(db_session: Session) -> None:
+    product, source, marketplace = _make_product_source_marketplace(db_session)
+    inputs = dict(product_id=product.id, source_id=source.id, marketplace_id=marketplace.id)
+
+    opportunity = evaluate_opportunity(
+        db_session,
+        OpportunityCreate(**inputs, buy_price=45000, sell_price=120000),
+    )
+    # A re-evaluation (discovery re-run) must NOT record a second DETECTED
+    # event or a second FOUND lifecycle event.
+    evaluate_opportunity(
+        db_session,
+        OpportunityCreate(**inputs, buy_price=50000, sell_price=130000),
+    )
+
+    detected_events = (
+        db_session.query(AnalyticsEvent)
+        .filter_by(opportunity_id=opportunity.id, event_type=AnalyticsEventType.DETECTED)
+        .all()
+    )
+    assert len(detected_events) == 1
+
+    found_events = (
+        db_session.query(OpportunityLifecycleEvent)
+        .filter_by(opportunity_id=opportunity.id, stage=LifecycleStage.FOUND)
+        .all()
+    )
+    assert len(found_events) == 1

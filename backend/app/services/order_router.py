@@ -25,9 +25,13 @@ from decimal import Decimal
 from sqlalchemy.orm import Session
 
 from backend.app.core.logging import get_logger
+from backend.app.core.time import utcnow
+from backend.app.models.analytics import AnalyticsEvent, AnalyticsEventType
+from backend.app.models.lifecycle import LifecycleStage, OpportunityLifecycleEvent
+from backend.app.models.opportunity import Opportunity
 from backend.app.models.order import Order, OrderStatus
 from backend.app.models.source import Source, SourceProduct
-from backend.app.services.pricing_engine import calculate_net_profit
+from backend.app.services.pricing_engine import calculate_margin, calculate_net_profit
 
 logger = get_logger(__name__)
 
@@ -51,6 +55,52 @@ def select_best_supplier(db: Session, product_id: str) -> SupplierChoice | None:
         return None
     chosen = candidates[0]
     return SupplierChoice(source_product=chosen, source=chosen.source)
+
+
+def _record_sold_analytics(
+    db: Session, *, opportunity_id: str, net_profit: Decimal, selling_price: Decimal
+) -> None:
+    """Real SOLD lifecycle/analytics event — only when the caller actually
+    knows which Opportunity this real sale is for (order_sync.py resolves
+    this from the sold item's product). time_to_sale is only computed when
+    a real FOUND lifecycle event exists for this opportunity — never
+    guessed."""
+    opportunity = db.get(Opportunity, opportunity_id)
+    if opportunity is None:
+        return
+
+    real_margin = calculate_margin(net_profit, selling_price)
+
+    found_event = (
+        db.query(OpportunityLifecycleEvent)
+        .filter_by(opportunity_id=opportunity_id, stage=LifecycleStage.FOUND)
+        .order_by(OpportunityLifecycleEvent.occurred_at.asc())
+        .first()
+    )
+    time_to_sale_minutes = None
+    if found_event is not None:
+        elapsed = utcnow() - found_event.occurred_at
+        time_to_sale_minutes = int(elapsed.total_seconds() // 60)
+
+    db.add(
+        OpportunityLifecycleEvent(
+            opportunity_id=opportunity_id,
+            stage=LifecycleStage.SOLD,
+            reason="Venta real detectada en MercadoLibre",
+        )
+    )
+    db.add(
+        AnalyticsEvent(
+            opportunity_id=opportunity_id,
+            event_type=AnalyticsEventType.SOLD,
+            estimated_margin=opportunity.margin,
+            real_margin=real_margin,
+            time_to_sale_minutes=time_to_sale_minutes,
+            confidence_score_at_detection=opportunity.confidence_score,
+        )
+    )
+    opportunity.lifecycle_stage = LifecycleStage.SOLD
+    db.commit()
 
 
 def create_order_from_sale(
@@ -102,6 +152,11 @@ def create_order_from_sale(
     db.add(order)
     db.commit()
     db.refresh(order)
+
+    if opportunity_id is not None:
+        _record_sold_analytics(
+            db, opportunity_id=opportunity_id, net_profit=net_profit, selling_price=selling_price
+        )
 
     if choice is None:
         logger.warning(
