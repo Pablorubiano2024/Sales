@@ -1,0 +1,50 @@
+name: Market Gap Scan
+
+# Runs scripts/run_market_gap_scan.py: captures a real Buy Box snapshot
+# (seller count, winning price) for every APPROVED/PROMISING Opportunity
+# that has a real MercadoLibre catalog match, and raises a MarketGapEvent
+# when something real changed since the last snapshot. READ-ONLY against
+# MercadoLibre (only GET calls) — never publishes or modifies a listing.
+#
+# Unlike discover/publish/sync, this job has no ordering dependency on
+# the other daily workflows, so it doesn't try to compensate for the
+# ~4.5h scheduled-run delay documented in discover-opportunities.yml's
+# cron comment (confirmed live 2026-09-26) — landing a few hours later
+# than the nominal every-6-hours slot doesn't break anything here, it
+# just means the real snapshot cadence is closer to "several times a
+# day" than exactly every 6 hours. That's still the finest reasonable
+# cadence given that delay (the user's original 10-minute ask isn't
+# achievable on GitHub Actions' free scheduler).
+#
+# Requires these repo secrets (Settings -> Secrets and variables ->
+# Actions): DATABASE_URL, ML_CLIENT_ID, ML_CLIENT_SECRET, ML_REDIRECT_URI
+# (same MercadoLibre app credentials the other workflows use).
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  market-gap-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Poetry
+        run: pipx install poetry
+
+      - name: Install dependencies
+        run: poetry install --no-root --only main
+
+      - name: Run market gap scan
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ML_CLIENT_ID: ${{ secrets.ML_CLIENT_ID }}
+          ML_CLIENT_SECRET: ${{ secrets.ML_CLIENT_SECRET }}
+          ML_REDIRECT_URI: ${{ secrets.ML_REDIRECT_URI }}
+        run: poetry run python scripts/run_market_gap_scan.py
