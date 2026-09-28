@@ -65,6 +65,7 @@ class MercadoLibreAdapter(MarketplaceAdapter):
         self._client = httpx.Client(base_url=base_url, timeout=timeout, transport=transport)
         self._authenticated = False
         self._access_token: str | None = None
+        self._user_id: int | None = None
 
     def close(self) -> None:
         self._client.close()
@@ -143,7 +144,8 @@ class MercadoLibreAdapter(MarketplaceAdapter):
 
         self._access_token = credential.access_token
         self._authenticated = True
-        logger.info("MercadoLibre authenticated as user_id=%s", response.json().get("id"))
+        self._user_id = response.json().get("id")
+        logger.info("MercadoLibre authenticated as user_id=%s", self._user_id)
         return True
 
     def search_products(self, query: str, limit: int = 20) -> list[MarketplaceListingInfo]:
@@ -324,9 +326,57 @@ class MercadoLibreAdapter(MarketplaceAdapter):
         )
 
     def get_orders(self, since: str | None = None) -> list[MarketplaceOrderInfo]:
-        # TODO: GET /orders/search?seller={user_id} — this is the piece
-        # Phase 6 (order monitoring) needs; the OAuth "Venta y envíos de un
-        # producto" scope was granted for exactly this.
-        raise NotImplementedError(
-            "MercadoLibre get_orders: endpoint not yet verified against real responses."
+        """GET /orders/search?seller={user_id}. The real granted OAuth
+        scope (urn:ml:mktp:orders-shipments:/read-write) and the response
+        envelope ({"results": [...], "paging": {...}}) are verified live —
+        but against zero real orders so far (this account has had none),
+        so the per-order/order_items field names below are DOC-verified
+        only, not live-verified: cross-checked 2026-09-28 against two
+        independent mirrors of MercadoLibre's own docs (the docs site
+        itself blocks automated fetches) — order.id/.status/
+        .date_created/.total_amount/.currency_id/.order_items[].item.id/
+        .quantity/.unit_price all agreed between both. Treat this as
+        best-effort until it's exercised against a real populated order.
+
+        `since` filters client-side on the real `date_created` field
+        rather than an unverified query-param name. Only the first page
+        of results is fetched — pagination isn't handled yet (fine while
+        real order volume is low; revisit if `paging.total` ever exceeds
+        one page)."""
+        if not self._authenticated or self._access_token is None or self._user_id is None:
+            raise RuntimeError("Call authenticate() before get_orders().")
+
+        response = self._client.get(
+            "/orders/search",
+            params={"seller": str(self._user_id)},
+            headers={"Authorization": f"Bearer {self._access_token}"},
         )
+        if response.status_code != 200:
+            logger.error("MercadoLibre get_orders failed: %s", response.text)
+            raise RuntimeError(
+                f"MercadoLibre get_orders failed ({response.status_code}): {response.text}"
+            )
+
+        orders: list[MarketplaceOrderInfo] = []
+        for raw in response.json().get("results", []):
+            date_created = raw.get("date_created")
+            if since is not None and date_created is not None and date_created < since:
+                continue
+
+            order_items = raw.get("order_items") or []
+            first_item = order_items[0] if order_items else {}
+            item = first_item.get("item") or {}
+            item_id = item.get("id")
+
+            orders.append(
+                MarketplaceOrderInfo(
+                    external_id=str(raw["id"]),
+                    status=raw.get("status", "unknown"),
+                    total_amount=Decimal(str(raw.get("total_amount", 0))),
+                    currency=raw.get("currency_id", "COP"),
+                    item_external_id=str(item_id) if item_id is not None else None,
+                    quantity=int(first_item.get("quantity", 1)),
+                    raw=raw,
+                )
+            )
+        return orders

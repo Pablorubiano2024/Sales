@@ -299,3 +299,133 @@ def test_update_price_sends_a_bare_integer_for_a_whole_cop_amount(
         adapter._authenticated = True  # noqa: SLF001
         adapter._access_token = "tok"  # noqa: SLF001
         adapter.update_price("MCO123456789", Decimal("75000"))
+
+
+def test_get_orders_requires_authentication_first(db_session: Session) -> None:
+    with MercadoLibreAdapter(db_session) as adapter:
+        with pytest.raises(RuntimeError, match="authenticate"):
+            adapter.get_orders()
+
+
+def test_get_orders_parses_a_real_shaped_response(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Response shape doc-verified 2026-09-28 against two independent
+    MercadoLibre docs mirrors (see get_orders' own docstring) — this
+    account has had zero real orders to test a populated response
+    against."""
+    monkeypatch.setattr(ml_module, "get_settings", lambda: FAKE_SETTINGS)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/orders/search"
+        assert request.url.params["seller"] == "123456"
+        assert request.headers["authorization"] == "Bearer tok"
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {
+                        "id": 987654321,
+                        "status": "paid",
+                        "date_created": "2026-09-27T10:00:00.000-04:00",
+                        "total_amount": 129900,
+                        "currency_id": "COP",
+                        "order_items": [
+                            {
+                                "item": {"id": "MCO123456789", "title": "Licuadora Ninja"},
+                                "quantity": 1,
+                                "unit_price": 129900,
+                                "currency_id": "COP",
+                            }
+                        ],
+                    }
+                ],
+                "paging": {"total": 1, "offset": 0, "limit": 50},
+            },
+        )
+
+    with MercadoLibreAdapter(db_session, transport=httpx.MockTransport(handler)) as adapter:
+        adapter._authenticated = True  # noqa: SLF001
+        adapter._access_token = "tok"  # noqa: SLF001
+        adapter._user_id = 123456  # noqa: SLF001
+        orders = adapter.get_orders()
+
+    assert len(orders) == 1
+    order = orders[0]
+    assert order.external_id == "987654321"
+    assert order.status == "paid"
+    assert order.total_amount == Decimal("129900")
+    assert order.currency == "COP"
+    assert order.item_external_id == "MCO123456789"
+    assert order.quantity == 1
+
+
+def test_get_orders_filters_by_since_client_side(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(ml_module, "get_settings", lambda: FAKE_SETTINGS)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {
+                        "id": 1,
+                        "status": "paid",
+                        "date_created": "2026-09-20T10:00:00.000-04:00",
+                        "total_amount": 100,
+                        "currency_id": "COP",
+                        "order_items": [{"item": {"id": "X"}, "quantity": 1}],
+                    },
+                    {
+                        "id": 2,
+                        "status": "paid",
+                        "date_created": "2026-09-27T10:00:00.000-04:00",
+                        "total_amount": 200,
+                        "currency_id": "COP",
+                        "order_items": [{"item": {"id": "Y"}, "quantity": 1}],
+                    },
+                ]
+            },
+        )
+
+    with MercadoLibreAdapter(db_session, transport=httpx.MockTransport(handler)) as adapter:
+        adapter._authenticated = True  # noqa: SLF001
+        adapter._access_token = "tok"  # noqa: SLF001
+        adapter._user_id = 123456  # noqa: SLF001
+        orders = adapter.get_orders(since="2026-09-25T00:00:00.000-04:00")
+
+    assert len(orders) == 1
+    assert orders[0].external_id == "2"
+
+
+def test_get_orders_handles_missing_item_gracefully(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(ml_module, "get_settings", lambda: FAKE_SETTINGS)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {
+                        "id": 1,
+                        "status": "paid",
+                        "total_amount": 100,
+                        "currency_id": "COP",
+                        "order_items": [],
+                    }
+                ]
+            },
+        )
+
+    with MercadoLibreAdapter(db_session, transport=httpx.MockTransport(handler)) as adapter:
+        adapter._authenticated = True  # noqa: SLF001
+        adapter._access_token = "tok"  # noqa: SLF001
+        adapter._user_id = 123456  # noqa: SLF001
+        orders = adapter.get_orders()
+
+    assert len(orders) == 1
+    assert orders[0].item_external_id is None

@@ -117,6 +117,14 @@ class MarketplaceOrderInfo:
     status: str
     total_amount: Decimal
     currency: str
+    # The marketplace item sold (maps back to MarketplaceProduct.external_id
+    # so the Order Router knows which internal Product this order is for).
+    # None when the marketplace's real order shape didn't have one where
+    # expected — callers must handle that rather than assume it's always
+    # present. Only the first line item is captured — multi-item orders
+    # aren't modeled here yet (Order is per-order, not per-line-item).
+    item_external_id: str | None = None
+    quantity: int = 1
     raw: dict[str, Any] | None = None
 
 
