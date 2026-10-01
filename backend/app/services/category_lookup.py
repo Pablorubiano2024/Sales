@@ -23,6 +23,16 @@ public). The real "Clásica" (gold_special) commission is category-
 specific, not the flat estimate `Settings.marketplace_commission_pct`
 assumed — confirmed live: 16.5% for MCO456045 (Freidoras) vs 12.0% for
 MCO118449 (Relojes), both flat across price points within the category.
+
+Real bug found live 2026-10-01: `tags.required` isn't the only tag that
+can block a real publish — MCO456045's real GTIN attribute has
+`tags.required: false` but `tags.conditional_required: true`, and a real
+create_listing attempt for a real Freidora Electrolux failed with
+`item.attribute.missing_conditional_required` (GTIN, a barcode we have no
+real source for) even though `is_safe_to_autopublish` had said yes.
+`required_attribute_ids` now also treats `conditional_required` as
+blocking — conservative on purpose: we don't know the exact condition
+that triggers it per category, so this never risks guessing a GTIN.
 """
 
 from __future__ import annotations
@@ -62,6 +72,11 @@ def predict_category(query: str, *, client: httpx.Client) -> str | None:
 
 
 def required_attribute_ids(category_id: str, *, client: httpx.Client) -> list[str]:
+    """Attribute ids that would block a real publish — both plainly
+    `required` and `conditional_required` (see module docstring for the
+    real GTIN case that made this necessary; a conditionally-required
+    attribute still rejects item creation with a real 400 when it applies,
+    and we have no way to know the condition ahead of time)."""
     try:
         response = client.get(f"/categories/{category_id}/attributes")
         response.raise_for_status()
@@ -69,7 +84,12 @@ def required_attribute_ids(category_id: str, *, client: httpx.Client) -> list[st
     except httpx.HTTPError as exc:
         logger.warning("categories/%s/attributes failed: %s", category_id, exc)
         return []
-    return [a["id"] for a in attributes if (a.get("tags") or {}).get("required")]
+    return [
+        a["id"]
+        for a in attributes
+        if (a.get("tags") or {}).get("required")
+        or (a.get("tags") or {}).get("conditional_required")
+    ]
 
 
 def is_safe_to_autopublish(category_id: str, *, client: httpx.Client) -> bool:

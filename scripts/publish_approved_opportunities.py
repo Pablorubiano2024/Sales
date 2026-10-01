@@ -1,4 +1,8 @@
-"""Publishes every real "approved" Opportunity to MercadoLibre.
+"""Publishes every real "approved" Opportunity to MercadoLibre —
+FULLY AUTOMATIC, no human approval step required (explicit user decision,
+2026-10-01: "totalmente automático, sin clics"). A human can still review
+drafts in the Streamlit Autopilot view and reject one; that's the one
+override this respects (see step 3).
 
 Step 1 of the "publicar + sincronizar a diario" plan: this runs BEFORE the
 daily sync job takes over the listing's lifecycle
@@ -9,41 +13,38 @@ For each APPROVED opportunity, in order:
   1. Skip if already published (an active/paused MarketplaceProduct row
      for this product+marketplace already exists) — republishing isn't
      needed, the sync job keeps it current.
-  2. Re-fetch the product live from its source (currently only Falabella
+  2. Skip if a human already rejected this opportunity's draft in the
+     Streamlit Autopilot view — the only real human override; never
+     auto-regenerated/republished over.
+  3. Re-fetch the product live from its source (currently only Falabella
      has a real adapter) — skip if it went out of stock or disappeared
      since discovery, rather than publish something already invalid.
-  3. Predict a category via MercadoLibre's real domain_discovery endpoint
-     and confirm the category only requires attributes create_listing()
-     already supplies (BRAND, MODEL) — skip anything needing more (e.g.
-     POWER_SUPPLY_TYPE), since guessing a per-product value would be
-     inventing data. See backend/app/services/category_lookup.py.
-  4. Skip if there's no real product photo (MercadoLibre's "free" listing
-     type effectively requires one — verified live 2026-09-21).
-  5. Use the source's own real brand/model (e.g. Falabella's "SAMSUNG" /
-     "SM L320NZSALTA") instead of the "Genérica"/"Genérico" placeholder —
-     publishing a real branded product as generic hurt MercadoLibre's own
-     quality score, confirmed live 2026-09-22. Also maps any other real
-     spec (e.g. "Tipo de pantalla") onto a matching category attribute by
-     exact name, when one safely exists (category_lookup.match_specifications).
-  6. Recompute the opportunity against the real, category-specific
-     "Clásica" (gold_special) sale commission (category_lookup.
-     get_sale_commission_pct) — skip if it's no longer actually
-     profitable under the real fee, not the flat estimate discovery used.
-  7. Publish via listing_service.publish_and_record(), which also records
-     the MarketplaceProduct row the sync job depends on.
+  4. Generate (or refresh) its ListingDraft via listing_draft_service.
+     generate_draft() — real category prediction, safe-attribute check,
+     real brand/model/spec-attribute mapping, and the real category-
+     specific "Clásica" (gold_special) sale commission, all in that one
+     module (not duplicated here).
+  5. Recompute the opportunity against that real commission — skip if
+     it's no longer actually profitable under the real fee, not the flat
+     estimate discovery used.
+  6. Run the Opportunity Validator (Phase 1) against the real stock/price
+     already fetched in step 3.
+  7. Publish via listing_service.publish_and_record(), using the draft's
+     real title/category/brand/model/pictures/extra_attributes — which
+     also records the MarketplaceProduct row the sync job depends on.
 
 Publishes under "Clásica" (gold_special), not "free": the free tier's
 quota is a real, scarce cap shared across every free listing the account
 holds at once (confirmed live 2026-09-25 — it dropped from 10 to 1 after
 publishing 10 real items and doesn't reset daily), so it can't support
 ongoing daily publishing. Clásica has no such cap, at the cost of a real
-sale commission instead of $0 — step 6 makes sure that's still covered.
+sale commission instead of $0 — step 5 makes sure that's still covered.
 
 DRY RUN BY DEFAULT — prints exactly what would happen (publish vs. skip +
 reason) without creating any real listing. Real MercadoLibre has no
 sandbox: every publish here is a genuine, public, live item a real buyer
 could purchase. Pass --confirm to actually publish. Note: even a dry run
-now authenticates (a read-only token verify/refresh) because step 6 needs
+now authenticates (a read-only token verify/refresh) because step 4 needs
 a bearer token for the real commission lookup.
 
 Usage:
@@ -60,6 +61,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import json  # noqa: E402
+
 import httpx  # noqa: E402
 
 from backend.app.core.database import SessionLocal, init_db  # noqa: E402
@@ -67,17 +70,16 @@ from backend.app.core.logging import get_logger  # noqa: E402
 from backend.app.integrations.mercadolibre import MercadoLibreAdapter  # noqa: E402
 from backend.app.models.analytics import AnalyticsEvent, AnalyticsEventType  # noqa: E402
 from backend.app.models.lifecycle import LifecycleStage, OpportunityLifecycleEvent  # noqa: E402
+from backend.app.models.listing_draft import ListingDraft, ListingDraftStatus  # noqa: E402
 from backend.app.models.marketplace import ListingStatus, Marketplace  # noqa: E402
 from backend.app.models.opportunity import Opportunity, OpportunityStatus  # noqa: E402
 from backend.app.schemas.opportunity import OpportunityCreate  # noqa: E402
 from backend.app.services import category_lookup, listing_service  # noqa: E402
 from backend.app.services.arbitrage_engine import evaluate_opportunity  # noqa: E402
 from backend.app.services.listing_draft_service import (  # noqa: E402
-    MAX_PICTURES,
     DraftGenerationError,
-    extract_model,
     fetch_live_source_data,
-    truncate_title,
+    generate_draft,
 )
 from backend.app.services.opportunity_validator import validate_opportunity  # noqa: E402
 
@@ -141,6 +143,18 @@ def main() -> None:
                     skipped += 1
                     continue
 
+                # The one real human override: a draft a human explicitly
+                # rejected in the Streamlit Autopilot view stays rejected —
+                # never auto-regenerated/republished over.
+                existing_draft = db.query(ListingDraft).filter_by(opportunity_id=opp.id).first()
+                if (
+                    existing_draft is not None
+                    and existing_draft.status == ListingDraftStatus.REJECTED
+                ):
+                    print(f"SKIP  {label}: borrador rechazado manualmente, no se reintenta")
+                    skipped += 1
+                    continue
+
                 live_or_error = fetch_live_source_data(db, opp)
                 if isinstance(live_or_error, DraftGenerationError):
                     print(f"SKIP  {label}: {live_or_error.reason}")
@@ -148,38 +162,25 @@ def main() -> None:
                     continue
                 live = live_or_error
 
-                # Falabella's search-result name (what discovery stores on
-                # Product.name) and its detail-page name can genuinely
-                # differ — e.g. a real product's search listing omitted
-                # "Imusa" that its own detail page includes. The detail
-                # page (already fetched above as `live`) is the richer,
-                # more current one — prefer it for the actual publish, and
-                # sync it back onto the catalog so it stays accurate.
-                real_name = live.name or product.name
-                if real_name != product.name:
-                    product.name = real_name
-                    db.commit()
-
-                category_id = category_lookup.predict_category(real_name, client=ml_public_client)
-                if category_id is None:
-                    print(f"SKIP  {label}: no se pudo predecir categoría")
-                    skipped += 1
-                    continue
-                if not category_lookup.is_safe_to_autopublish(category_id, client=ml_public_client):
-                    print(
-                        f"SKIP  {label}: categoría {category_id} requiere atributos "
-                        "adicionales — revisar manualmente"
-                    )
-                    skipped += 1
-                    continue
-
-                title = truncate_title(product.name)
-                pictures = list(live.image_urls[:MAX_PICTURES])
-                brand = live.brand or product.brand or "Genérica"
-                model = extract_model(live.specifications) or "Genérico"
-                extra_attributes = category_lookup.match_specifications(
-                    category_id, live.specifications, client=ml_public_client
+                # Real category prediction, safe-attribute check, real
+                # brand/model/spec mapping, and the real category-specific
+                # commission — all computed by listing_draft_service, the
+                # single source of truth for this logic (not duplicated
+                # here). Also syncs Product.name from the live detail page.
+                draft_or_error = generate_draft(
+                    db,
+                    opp,
+                    live,
+                    ml_public_client=ml_public_client,
+                    access_token=access_token,
+                    listing_type_id=LISTING_TYPE_ID,
                 )
+                if isinstance(draft_or_error, DraftGenerationError):
+                    print(f"SKIP  {label}: {draft_or_error.reason}")
+                    skipped += 1
+                    continue
+                draft = draft_or_error
+                attrs = json.loads(draft.attributes or "{}")
 
                 # The real "Clásica" commission is category-specific (16.5%
                 # for Freidoras vs 12.0% for Relojes, confirmed live
@@ -188,15 +189,11 @@ def main() -> None:
                 # estimate, and skip if it's no longer actually profitable
                 # under the real fee. evaluate_opportunity upserts the same
                 # Opportunity row, so this also corrects it going forward.
-                real_commission_pct = category_lookup.get_sale_commission_pct(
-                    category_id,
-                    opp.sell_price,
-                    client=ml_public_client,
-                    access_token=access_token,
-                    listing_type_id=LISTING_TYPE_ID,
-                )
+                real_commission_pct = attrs.get("commission_pct")
                 if real_commission_pct is not None:
-                    real_fee = (opp.sell_price * real_commission_pct).quantize(Decimal("0.01"))
+                    real_fee = (opp.sell_price * Decimal(str(real_commission_pct))).quantize(
+                        Decimal("0.01")
+                    )
                     opp = evaluate_opportunity(
                         db,
                         OpportunityCreate(
@@ -215,7 +212,7 @@ def main() -> None:
                     if opp.status not in (OpportunityStatus.APPROVED, OpportunityStatus.PROMISING):
                         print(
                             f"SKIP  {label}: con comisión real de {LISTING_TYPE_ID} "
-                            f"({real_commission_pct:.1%}) ya no es rentable "
+                            f"({float(real_commission_pct):.1%}) ya no es rentable "
                             f"(status={opp.status.value})"
                         )
                         skipped += 1
@@ -224,7 +221,7 @@ def main() -> None:
                     logger.warning(
                         "No se pudo obtener la comisión real para categoría=%s; "
                         "usando el estimado de Settings.marketplace_commission_pct",
-                        category_id,
+                        draft.category_id,
                     )
 
                 # Autopilot Phase 1 gate — margin/score/seller_count/stock
@@ -241,12 +238,15 @@ def main() -> None:
                     skipped += 1
                     continue
 
+                pictures = json.loads(draft.image_urls or "[]")
+                extra_attributes = attrs.get("extra", [])
+
                 if not confirm:
                     print(
                         f"PUBLICARÍA  {label}\n"
-                        f"       categoria={category_id} precio={opp.sell_price} COP "
-                        f"fotos={len(pictures)} marca={brand} modelo={model} "
-                        f"atributos_extra={len(extra_attributes)}"
+                        f"       categoria={draft.category_id} precio={opp.sell_price} COP "
+                        f"fotos={len(pictures)} marca={attrs.get('brand')} "
+                        f"modelo={attrs.get('model')} atributos_extra={len(extra_attributes)}"
                     )
                     published += 1
                     continue
@@ -266,12 +266,12 @@ def main() -> None:
                             ml_adapter,
                             product.id,
                             marketplace.id,
-                            title=title,
+                            title=draft.title,
                             price=opp.sell_price,
                             currency="COP",
-                            category_id=category_id,
-                            brand=brand,
-                            model=model,
+                            category_id=draft.category_id,
+                            brand=attrs.get("brand", "Genérica"),
+                            model=attrs.get("model", "Genérico"),
                             listing_type_id=LISTING_TYPE_ID,
                             pictures=pictures,
                             extra_attributes=extra_attributes,
@@ -291,6 +291,8 @@ def main() -> None:
                 if record is None:
                     continue
 
+                draft.status = ListingDraftStatus.PUBLISHED
+                db.add(draft)
                 db.add(
                     OpportunityLifecycleEvent(
                         opportunity_id=opp.id,
@@ -311,7 +313,7 @@ def main() -> None:
 
                 print(
                     f"PUBLICADA  {label}: {record.external_id} {record.url}\n"
-                    f"       categoria={category_id} precio={opp.sell_price} COP "
+                    f"       categoria={draft.category_id} precio={opp.sell_price} COP "
                     f"fotos={len(pictures)}"
                 )
                 published += 1

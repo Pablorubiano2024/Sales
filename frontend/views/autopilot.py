@@ -1,8 +1,9 @@
-"""Vista de Autopilot (Fase 3): cola de aprobación de borradores de
-publicación, generados a partir de Opportunities aprobadas. Aprobar solo
-mueve un borrador a "listo" — publicar de verdad sigue siendo un paso
-explícito y separado (scripts/publish_approved_opportunities.py), tal
-como se pidió: "no publicar inmediatamente".
+"""Vista de Autopilot (Fase 3): cola de borradores de publicación,
+generados a partir de Opportunities aprobadas. La publicación real ahora
+es completamente automática (scripts/publish_approved_opportunities.py,
+vía GitHub Actions) — "Aprobar" aquí es solo informativo (marca que un
+humano ya lo revisó); "Rechazar" sí es real: un borrador rechazado se
+salta en cada corrida automática hasta que alguien lo regenere.
 """
 
 from __future__ import annotations
@@ -31,7 +32,8 @@ drafted_opportunity_ids = {d["opportunity_id"] for d in drafts}
 st.subheader("1. Oportunidades aprobadas sin borrador")
 st.caption(
     "Genera un borrador de publicación con datos reales de la fuente (título, "
-    "descripción, categoría, comisión) — no publica nada todavía."
+    "descripción, categoría, comisión) para revisarlo aquí — la corrida automática "
+    "igual genera y publica el suyo propio si no haces nada."
 )
 without_draft = [o for o in opportunities if o["id"] not in drafted_opportunity_ids]
 if not without_draft:
@@ -190,15 +192,26 @@ else:
 
         st.divider()
         col_approve, col_reject, col_source = st.columns(3)
-        if col_approve.button("✅ Aprobar", key=f"approve-{draft['id']}", width="stretch"):
+        if col_approve.button(
+            "✅ Aprobar",
+            key=f"approve-{draft['id']}",
+            width="stretch",
+            help="Solo informativo: marca que ya lo revisaste. La publicación automática "
+            "no espera esto.",
+        ):
             try:
                 api_client.approve_listing_draft(draft["id"])
-                st.success("Borrador aprobado (listo para publicar).")
+                st.success("Marcado como revisado.")
                 st.rerun()
             except api_client.ApiError as exc:
                 st.error(str(exc))
 
-        with col_reject.popover("❌ Rechazar", width="stretch"):
+        with col_reject.popover(
+            "❌ Rechazar",
+            width="stretch",
+            help="Esto sí es real: la publicación automática se salta este borrador hasta "
+            "que lo regeneres.",
+        ):
             reason = st.text_input("Motivo del rechazo", key=f"reason-{draft['id']}")
             if st.button("Confirmar rechazo", key=f"confirm-reject-{draft['id']}"):
                 if not reason:
@@ -206,7 +219,7 @@ else:
                 else:
                     try:
                         api_client.reject_listing_draft(draft["id"], reason)
-                        st.success("Borrador rechazado.")
+                        st.success("Borrador rechazado — la publicación automática lo saltará.")
                         st.rerun()
                     except api_client.ApiError as exc:
                         st.error(str(exc))

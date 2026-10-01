@@ -128,6 +128,23 @@ def test_generate_draft_builds_real_data_only(db_session: Session) -> None:
     assert result.image_urls is not None and "example.com" in result.image_urls
 
 
+def test_generate_draft_syncs_product_name_from_live_detail_page(db_session: Session) -> None:
+    """Real case: Falabella's search-result name can omit a brand word
+    ("Imusa") that the detail page includes — the detail page (`live`,
+    already fetched by the caller) is the richer, more current one and
+    should be synced back onto Product.name for every future caller, not
+    just this draft (moved here from publish_approved_opportunities.py
+    so both the draft and the real publish see the same synced name)."""
+    opportunity = _make_opportunity(db_session)
+    live = _live(name="Freidora De Aire Imusa Holstein 9 Litros Antiadherente")
+
+    with _client(_handler_safe_category) as ml_public_client:
+        generate_draft(db_session, opportunity, live, ml_public_client=ml_public_client)
+
+    db_session.refresh(opportunity.product)
+    assert opportunity.product.name == "Freidora De Aire Imusa Holstein 9 Litros Antiadherente"
+
+
 def test_generate_draft_returns_error_when_category_not_predicted(db_session: Session) -> None:
     opportunity = _make_opportunity(db_session)
     live = _live()

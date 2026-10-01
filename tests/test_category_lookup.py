@@ -95,6 +95,38 @@ def test_is_safe_to_autopublish_false_when_extra_attribute_required() -> None:
         assert category_lookup.is_safe_to_autopublish("MCO412089", client=client) is False
 
 
+def test_required_attribute_ids_includes_conditional_required() -> None:
+    """Real bug found live 2026-10-01: GTIN's real tags for category
+    MCO456045 are {"required": False, "conditional_required": True} — a
+    real create_listing attempt still failed with
+    item.attribute.missing_conditional_required. Exact real shape, not
+    guessed."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=[
+                {"id": "BRAND", "tags": {"required": True}},
+                {"id": "MODEL", "tags": {"required": True}},
+                {
+                    "id": "GTIN",
+                    "tags": {
+                        "multivalued": True,
+                        "variation_attribute": True,
+                        "used_hidden": True,
+                        "validate": True,
+                        "conditional_required": True,
+                    },
+                },
+            ],
+        )
+
+    with _client(handler) as client:
+        required = category_lookup.required_attribute_ids("MCO456045", client=client)
+        assert "GTIN" in required
+        assert category_lookup.is_safe_to_autopublish("MCO456045", client=client) is False
+
+
 _MCO118449_ATTRIBUTES = [
     {"id": "BRAND", "name": "Marca", "value_type": "string", "tags": {"required": True}},
     {"id": "MODEL", "name": "Modelo", "value_type": "string", "tags": {"required": True}},

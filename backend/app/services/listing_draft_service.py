@@ -1,18 +1,19 @@
 """Listing Draft service (Autopilot Phase 3).
 
-Turns an approved, validated Opportunity into a reviewable ListingDraft
-(title, description, bullets, attributes, category, images) WITHOUT
-publishing anything real. Reuses category_lookup.py's real MercadoLibre
-category/attribute/commission lookups exactly as
-scripts/publish_approved_opportunities.py already does — this module adds
-the "stop before Published, let a human review it" state
-(Draft/Ready/Rejected -> Published) the user asked for, it doesn't
-reimplement the category/attribute logic.
+Turns an approved, validated Opportunity into a ListingDraft (title,
+description, bullets, attributes, category, images) WITHOUT publishing
+anything real. Reuses category_lookup.py's real MercadoLibre category/
+attribute/commission lookups — the single source of truth for that logic.
 
-`truncate_title`/`MAX_TITLE_LENGTH`/`extract_model` live here as the one
-source of truth — publish_approved_opportunities.py imports them from
-here rather than keeping its own copy, since a draft's title/model IS what
-that script eventually publishes.
+This is also now the content source scripts/publish_approved_opportunities.py
+publishes from (title/category_id/brand/model/pictures/extra_attributes) —
+that script no longer predicts category or extracts brand/model itself,
+it calls `generate_draft` and reads the result, so there's exactly one
+place that logic lives. A human can still review/approve/reject a draft
+in Streamlit before it's published, but since the user asked for fully
+automatic publishing (no click required), the real publish loop doesn't
+wait on `approve_draft` — it only ever respects an explicit REJECTED
+status (a human override), never auto-regenerating/republishing over one.
 """
 
 from __future__ import annotations
@@ -126,6 +127,17 @@ def generate_draft(
     real_name = live.name or product.name
     title = truncate_title(real_name)
 
+    # Falabella's search-result name (what discovery stores on
+    # Product.name) and its detail-page name can genuinely differ — e.g.
+    # a real product's search listing omitted "Imusa" that its own detail
+    # page includes. The detail page (`live`, already fetched by the
+    # caller) is the richer, more current one — prefer it here and sync
+    # it back onto the catalog so it stays accurate for every future
+    # caller, not just this draft.
+    if real_name != product.name:
+        product.name = real_name
+        db.commit()
+
     category_id = category_lookup.predict_category(real_name, client=ml_public_client)
     if category_id is None:
         return DraftGenerationError("No se pudo predecir una categoría real para este producto")
@@ -187,10 +199,10 @@ def generate_draft(
 
 
 def approve_draft(db: Session, draft: ListingDraft) -> ListingDraft:
-    """Draft -> Ready. Publishing for real remains a separate, explicit
-    step (scripts/publish_approved_opportunities.py) — matches the user's
-    own "no publicar inmediatamente... en una segunda fase podrá
-    publicarlas automáticamente"."""
+    """Draft -> Ready. Informational/manual-review only now that
+    publishing is fully automatic (the publish loop doesn't check for
+    READY before publishing) — still useful for a human reviewing the
+    Streamlit queue to mark something as looked-at."""
     draft.status = ListingDraftStatus.READY
     db.commit()
     db.refresh(draft)
@@ -198,6 +210,10 @@ def approve_draft(db: Session, draft: ListingDraft) -> ListingDraft:
 
 
 def reject_draft(db: Session, draft: ListingDraft, reason: str) -> ListingDraft:
+    """The one real override: the automatic publish loop in
+    scripts/publish_approved_opportunities.py skips any Opportunity whose
+    draft is REJECTED and never auto-regenerates it — a human's "no"
+    here sticks until someone calls `generate_draft` again explicitly."""
     draft.status = ListingDraftStatus.REJECTED
     draft.rejection_reason = reason
     db.commit()
