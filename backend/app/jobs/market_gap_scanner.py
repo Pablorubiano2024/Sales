@@ -7,7 +7,9 @@ Feeds Phase 1 (opportunity_validator's seller_count check) and Phase 2
 (confidence_engine's competition factor) real data instead of their
 proxies — both already read the latest MarketGapSnapshot for an
 Opportunity, so simply running this populates real data for them with no
-further changes needed there.
+further changes needed there. Also the natural trigger point for Phase 6's
+Smart Alerts: a real market gap event is exactly the "new change" the
+alert gate requires (see gold_opportunity_alerts.py).
 
 Like discovery.py/price_monitor.py, this is invoked manually / from a
 script for now; a scheduler can call `run_market_gap_scan` directly once
@@ -25,6 +27,7 @@ from backend.app.core.logging import get_logger
 from backend.app.models.market_gap import MarketGapEvent, MarketGapEventType, MarketGapSnapshot
 from backend.app.models.opportunity import Opportunity
 from backend.app.services.catalog_lookup import find_catalog_product, get_buy_box_snapshot
+from backend.app.services.gold_opportunity_alerts import maybe_alert_gold_opportunity
 
 logger = get_logger(__name__)
 
@@ -148,16 +151,17 @@ def run_market_gap_scan(
         scanned += 1
 
         for event_type, detail in _detect_events(previous, current):
-            db.add(
-                MarketGapEvent(
-                    catalog_product_id=catalog_product_id,
-                    opportunity_id=opportunity.id,
-                    event_type=event_type,
-                    previous_snapshot_id=previous.id if previous else None,
-                    current_snapshot_id=current.id,
-                    detail=detail,
-                )
+            event = MarketGapEvent(
+                catalog_product_id=catalog_product_id,
+                opportunity_id=opportunity.id,
+                event_type=event_type,
+                previous_snapshot_id=previous.id if previous else None,
+                current_snapshot_id=current.id,
+                detail=detail,
             )
+            db.add(event)
+            db.commit()
+            db.refresh(event)
             events_detected += 1
             logger.info(
                 "Market gap event %s for opportunity %s: %s",
@@ -165,7 +169,8 @@ def run_market_gap_scan(
                 opportunity.id,
                 detail,
             )
-        db.commit()
+            if maybe_alert_gold_opportunity(db, opportunity, event):
+                logger.info("Alerta GOLD OPPORTUNITY enviada para oportunidad %s", opportunity.id)
 
     return ScanResult(
         scanned=scanned, skipped_no_catalog_match=skipped, events_detected=events_detected

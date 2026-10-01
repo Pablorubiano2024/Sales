@@ -67,6 +67,13 @@ class Settings(BaseSettings):
     # the key from your CJ account: Apps -> install "API" -> Get API Key page.
     cj_api_key: str | None = None
 
+    # --- Slack (Autopilot Phase 6 — Smart Alerts) ---
+    # A real Slack Incoming Webhook URL (api.slack.com/messaging/webhooks) —
+    # same mechanism already used in the "Jobs" project's
+    # app/slack_notifier.py. When unset, alerts are skipped (never queued,
+    # never silently dropped after being "sent").
+    slack_webhook_url: str | None = None
+
     # --- Arbitrage thresholds (defaults; configurable, never hard-coded inline) ---
     min_roi: Decimal = Decimal("0.30")
     min_net_profit: Decimal = Decimal("20000")

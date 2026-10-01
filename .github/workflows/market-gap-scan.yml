@@ -18,7 +18,12 @@ name: Market Gap Scan
 #
 # Requires these repo secrets (Settings -> Secrets and variables ->
 # Actions): DATABASE_URL, ML_CLIENT_ID, ML_CLIENT_SECRET, ML_REDIRECT_URI
-# (same MercadoLibre app credentials the other workflows use).
+# (same MercadoLibre app credentials the other workflows use), and
+# optionally SLACK_WEBHOOK_URL (Autopilot Phase 6 — a real market gap
+# event detected here is what triggers a "🚨 GOLD OPPORTUNITY" Slack
+# alert when the opportunity also clears score >= 90 and margin >= 25%;
+# see backend/app/services/gold_opportunity_alerts.py). Without that
+# secret, alerts are silently skipped — the scan itself still runs.
 
 on:
   schedule:
@@ -47,4 +52,5 @@ jobs:
           ML_CLIENT_ID: ${{ secrets.ML_CLIENT_ID }}
           ML_CLIENT_SECRET: ${{ secrets.ML_CLIENT_SECRET }}
           ML_REDIRECT_URI: ${{ secrets.ML_REDIRECT_URI }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: poetry run python scripts/run_market_gap_scan.py
