@@ -12,10 +12,15 @@ reimplemented.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 
 from sqlalchemy.orm import Session
 
+from backend.app.core.time import utcnow
 from backend.app.models.analytics import AnalyticsEvent, AnalyticsEventType
+from backend.app.models.lifecycle import LifecycleStage
+from backend.app.models.market_gap import MarketGapEvent
+from backend.app.models.opportunity import Opportunity
 from backend.app.services.confidence_engine import RecalibrationReport, recalibrate_weights
 
 
@@ -29,6 +34,14 @@ class AnalyticsSummary:
     avg_estimated_margin: float | None
     avg_real_margin: float | None
     confidence_recalibration: RecalibrationReport
+
+
+@dataclass(frozen=True, slots=True)
+class TodaySummary:
+    detected_today: int
+    published_today: int
+    sold_today: int
+    market_gap_events_today: int
 
 
 def _count(db: Session, event_type: AnalyticsEventType) -> int:
@@ -64,3 +77,45 @@ def get_analytics_summary(db: Session) -> AnalyticsSummary:
         avg_real_margin=_avg(real_margins),
         confidence_recalibration=recalibrate_weights(db),
     )
+
+
+def _start_of_today() -> datetime:
+    now = utcnow()
+    return now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def get_today_summary(db: Session) -> TodaySummary:
+    """Real counts since UTC midnight — not local time (matches every
+    other timestamp in this codebase, which is stored naive UTC)."""
+    today_start = _start_of_today()
+
+    def _count_today(event_type: AnalyticsEventType) -> int:
+        return (
+            db.query(AnalyticsEvent)
+            .filter(
+                AnalyticsEvent.event_type == event_type, AnalyticsEvent.recorded_at >= today_start
+            )
+            .count()
+        )
+
+    market_gap_events_today = (
+        db.query(MarketGapEvent).filter(MarketGapEvent.detected_at >= today_start).count()
+    )
+
+    return TodaySummary(
+        detected_today=_count_today(AnalyticsEventType.DETECTED),
+        published_today=_count_today(AnalyticsEventType.PUBLISHED),
+        sold_today=_count_today(AnalyticsEventType.SOLD),
+        market_gap_events_today=market_gap_events_today,
+    )
+
+
+def get_lifecycle_funnel(db: Session) -> dict[LifecycleStage, int]:
+    """Current real distribution of every Opportunity across the funnel
+    (found -> validated -> published -> sold / expired / cancelled) — a
+    live snapshot of Opportunity.lifecycle_stage, not an event count."""
+    rows = db.query(Opportunity.lifecycle_stage, Opportunity.id).all()
+    counts: dict[LifecycleStage, int] = dict.fromkeys(LifecycleStage, 0)
+    for stage, _id in rows:
+        counts[stage] = counts.get(stage, 0) + 1
+    return counts

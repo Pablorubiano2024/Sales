@@ -16,6 +16,7 @@ from backend.app.api import (
     capital_simulation,
     health,
     listing_drafts,
+    market_gap_events,
     marketplaces,
     mercadolibre_oauth,
     opportunities,
@@ -69,3 +70,4 @@ app.include_router(settings.router)
 app.include_router(listing_drafts.router)
 app.include_router(capital_simulation.router)
 app.include_router(analytics.router)
+app.include_router(market_gap_events.router)

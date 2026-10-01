@@ -22,3 +22,19 @@ class AnalyticsSummaryResponse(BaseModel):
     avg_estimated_margin: float | None
     avg_real_margin: float | None
     confidence_recalibration: ConfidenceRecalibrationRead
+
+
+class TodaySummaryResponse(BaseModel):
+    detected_today: int
+    published_today: int
+    sold_today: int
+    market_gap_events_today: int
+
+
+class LifecycleFunnelResponse(BaseModel):
+    found: int
+    validated: int
+    published: int
+    sold: int
+    expired: int
+    cancelled: int

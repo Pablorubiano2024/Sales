@@ -13,7 +13,7 @@ import json
 import api_client
 import pandas as pd
 import streamlit as st
-from i18n import listing_draft_status_label
+from i18n import lifecycle_stage_label, listing_draft_status_label
 
 st.title("🤖 Autopilot")
 
@@ -28,6 +28,27 @@ except api_client.ApiError as exc:
 products_by_id = {p["id"]: p for p in products}
 opportunities_by_id = {o["id"]: o for o in opportunities}
 drafted_opportunity_ids = {d["opportunity_id"] for d in drafts}
+
+st.subheader("0. Resumen de hoy")
+try:
+    today = api_client.get_today_summary()
+    funnel = api_client.get_lifecycle_funnel()
+except api_client.ApiError as exc:
+    st.error(str(exc))
+else:
+    t1, t2, t3, t4 = st.columns(4)
+    t1.metric("Detectadas hoy", today["detected_today"])
+    t2.metric("Publicadas hoy", today["published_today"])
+    t3.metric("Vendidas hoy", today["sold_today"])
+    t4.metric("Cambios de mercado hoy", today["market_gap_events_today"])
+
+    funnel_order = ["found", "validated", "published", "sold", "expired", "cancelled"]
+    funnel_cols = st.columns(len(funnel_order))
+    for col, stage in zip(funnel_cols, funnel_order, strict=True):
+        col.metric(lifecycle_stage_label(stage), funnel.get(stage, 0))
+    st.caption("Embudo completo: dónde está cada oportunidad real ahora mismo, no solo hoy.")
+
+st.divider()
 
 st.subheader("1. Oportunidades aprobadas sin borrador")
 st.caption(
@@ -190,6 +211,21 @@ else:
                 except api_client.ApiError as exc:
                     st.error(str(exc))
 
+            with st.expander("Línea de tiempo", expanded=False):
+                try:
+                    events = api_client.get_opportunity_lifecycle(opportunity["id"])
+                except api_client.ApiError as exc:
+                    st.error(str(exc))
+                else:
+                    if not events:
+                        st.caption("Sin eventos reales de ciclo de vida todavía.")
+                    for event in events:
+                        label = lifecycle_stage_label(event["stage"])
+                        line = f"**{label}** — {event['occurred_at']}"
+                        if event.get("reason"):
+                            line += f"\n\n    {event['reason']}"
+                        st.write(line)
+
         st.divider()
         col_approve, col_reject, col_source = st.columns(3)
         if col_approve.button(
@@ -337,3 +373,35 @@ else:
             f"en expiradas: {recal['avg_score_expired']:.0f} "
             f"({recal['sold_count']} vendidas, {recal['expired_count']} expiradas analizadas)."
         )
+
+st.divider()
+
+st.subheader("5. Eventos de Market Gap")
+st.caption(
+    "Cambios reales de Buy Box detectados por el scanner — ganador anterior "
+    "desaparecido, precio subió, bajaron los vendedores, o volvió el stock."
+)
+try:
+    market_gap_events = api_client.get_market_gap_events(limit=50)
+except api_client.ApiError as exc:
+    st.error(str(exc))
+else:
+    if not market_gap_events:
+        st.info("Todavía no hay cambios reales detectados.")
+    else:
+        event_type_labels = {
+            "lowest_seller_disappeared": "Vendedor ganador desapareció",
+            "buy_box_price_increased": "Precio ganador subió",
+            "seller_count_dropped": "Bajaron los vendedores",
+            "stock_recovered": "Volvió el stock",
+        }
+        rows = [
+            {
+                "Producto": e.get("product_name") or e["catalog_product_id"],
+                "Cambio": event_type_labels.get(e["event_type"], e["event_type"]),
+                "Detalle": e.get("detail") or "—",
+                "Detectado": e["detected_at"],
+            }
+            for e in market_gap_events
+        ]
+        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)

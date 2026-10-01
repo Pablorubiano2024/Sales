@@ -98,3 +98,14 @@ class AIOpportunityAnalysis(BaseModel):
     recommendation: str
     reasoning: str
     warnings: list[str] = Field(default_factory=list)
+
+
+class LifecycleEventRead(BaseModel):
+    """One real transition in an Opportunity's funnel — see
+    models/lifecycle.py."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    stage: LifecycleStage
+    reason: str | None = None
+    occurred_at: datetime

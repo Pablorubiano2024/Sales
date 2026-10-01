@@ -7,9 +7,14 @@ from sqlalchemy.orm import Session
 
 from backend.app.core.database import get_db
 from backend.app.core.security import require_api_key
+from backend.app.models.lifecycle import OpportunityLifecycleEvent
 from backend.app.models.opportunity import Opportunity, OpportunityStatus
 from backend.app.models.source import SourceProduct
-from backend.app.schemas.opportunity import OpportunityAnalyzeRequest, OpportunityRead
+from backend.app.schemas.opportunity import (
+    LifecycleEventRead,
+    OpportunityAnalyzeRequest,
+    OpportunityRead,
+)
 from backend.app.schemas.validation import ValidationResultRead
 from backend.app.services.ai_service import enrich_opportunity_with_ai
 from backend.app.services.arbitrage_engine import evaluate_opportunity
@@ -140,3 +145,20 @@ def validate(
         checks=[{"name": c.name, "passed": c.passed, "detail": c.detail} for c in result.checks],
         overall_passed=result.overall_passed,
     )
+
+
+@router.get("/{opportunity_id}/lifecycle", response_model=list[LifecycleEventRead])
+def lifecycle(opportunity_id: str, db: Session = Depends(get_db)) -> list[LifecycleEventRead]:
+    """Real funnel history for one Opportunity (found -> validated ->
+    published -> sold/expired/cancelled), oldest first."""
+    opportunity = db.get(Opportunity, opportunity_id)
+    if opportunity is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Opportunity not found")
+
+    events = (
+        db.query(OpportunityLifecycleEvent)
+        .filter_by(opportunity_id=opportunity_id)
+        .order_by(OpportunityLifecycleEvent.occurred_at.asc())
+        .all()
+    )
+    return [LifecycleEventRead.model_validate(e) for e in events]

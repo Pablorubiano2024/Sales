@@ -144,3 +144,19 @@ def simulate_capital(capital: float, max_daily_purchases: int, min_margin: float
 
 def get_analytics_summary() -> dict:
     return _request("GET", "/api/analytics/summary")
+
+
+def get_today_summary() -> dict:
+    return _request("GET", "/api/analytics/today")
+
+
+def get_lifecycle_funnel() -> dict:
+    return _request("GET", "/api/analytics/funnel")
+
+
+def get_market_gap_events(**params: Any) -> list[dict]:
+    return _request("GET", "/api/market-gap-events", params=params)
+
+
+def get_opportunity_lifecycle(opportunity_id: str) -> list[dict]:
+    return _request("GET", f"/api/opportunities/{opportunity_id}/lifecycle")
