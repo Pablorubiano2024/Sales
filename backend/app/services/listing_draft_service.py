@@ -25,6 +25,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from backend.app.core.logging import get_logger
+from backend.app.integrations.alkosto_source import AlkostoSourceAdapter, KtronixSourceAdapter
 from backend.app.integrations.base import SourceAdapter, SourceProductInfo
 from backend.app.integrations.falabella_source import (
     FalabellaSourceAdapter,
@@ -53,6 +54,8 @@ SUPPORTED_SOURCES: dict[str, type[SourceAdapter]] = {
     "Homecenter Colombia": HomecenterSourceAdapter,
     "Imusa Colombia": ImusaSourceAdapter,
     "Jumbo Colombia": JumboSourceAdapter,
+    "Alkosto Colombia": AlkostoSourceAdapter,
+    "Ktronix Colombia": KtronixSourceAdapter,
 }
 
 

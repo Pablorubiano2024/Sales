@@ -71,3 +71,15 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: poetry run python scripts/discover_jumbo.py
+
+      - name: Discover Alkosto
+        continue-on-error: true
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: poetry run python scripts/discover_alkosto.py
+
+      - name: Discover Ktronix
+        continue-on-error: true
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: poetry run python scripts/discover_ktronix.py
