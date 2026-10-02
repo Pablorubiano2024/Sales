@@ -12,6 +12,15 @@ proveedor": there's no real reputation data source for a retail supplier
 (Falabella/Homecenter/Imusa/Jumbo aren't individual marketplace sellers
 with a reputation score) — always reported as not applicable, per the
 request's own "si aplica".
+
+`price_competitive` (added 2026-10-02, user's own follow-up question
+"¿está validando que el precio es el menor de todos los vendedores?" —
+the original spec's "diferencia contra Buy Box" rule): once the Market
+Gap Scanner (Phase 4) has a real snapshot for this Opportunity, our own
+`sell_price` must not be priced above the real current Buy Box winner —
+otherwise we'd publish a price that's already known to lose on price to
+a real competitor. Reports `passed=None` until a real snapshot exists,
+same "never invent" rule as the others.
 """
 
 from __future__ import annotations
@@ -110,6 +119,28 @@ def _check_seller_count(db: Session, opportunity: Opportunity) -> ValidationChec
     )
 
 
+def _check_price_competitive(db: Session, opportunity: Opportunity) -> ValidationCheck:
+    latest = get_latest_market_gap_snapshot(db, opportunity.id)
+    if latest is None:
+        return ValidationCheck(
+            name="price_competitive",
+            passed=None,
+            detail="Sin snapshot real de Market Gap Scanner todavía",
+        )
+    if latest.buy_box_price is None:
+        return ValidationCheck(
+            name="price_competitive",
+            passed=True,
+            detail="Sin competencia real activa en este momento (seller_count=0)",
+        )
+    passed = opportunity.sell_price <= latest.buy_box_price
+    return ValidationCheck(
+        name="price_competitive",
+        passed=passed,
+        detail=(f"nuestro precio={opportunity.sell_price} vs. ganador real={latest.buy_box_price}"),
+    )
+
+
 def _check_stock(live_stock_available: bool | None) -> ValidationCheck:
     if live_stock_available is None:
         return ValidationCheck(
@@ -166,6 +197,7 @@ def validate_opportunity(
         _check_margin(opportunity),
         _check_confidence_score(opportunity),
         _check_seller_count(db, opportunity),
+        _check_price_competitive(db, opportunity),
         _check_stock(live_stock_available),
         _check_price_unchanged(opportunity, live_price_cop),
         _check_supplier_reputation(),

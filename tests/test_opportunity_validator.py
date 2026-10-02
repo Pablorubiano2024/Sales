@@ -1,6 +1,7 @@
 """Unit tests for the Opportunity Validator (Autopilot Phase 1). Pure
-rule checks — only `seller_count` touches the DB (a MarketGapSnapshot
-lookup), everything else is evaluated straight off an Opportunity."""
+rule checks — only `seller_count`/`price_competitive` touch the DB (a
+MarketGapSnapshot lookup), everything else is evaluated straight off an
+Opportunity."""
 
 from __future__ import annotations
 
@@ -135,6 +136,81 @@ def test_seller_count_uses_latest_snapshot(db_session: Session) -> None:
     seller_check = next(c for c in result.checks if c.name == "seller_count")
     assert seller_check.passed is False
     assert "20" in seller_check.detail
+
+
+def test_price_competitive_without_snapshot_is_not_applicable(db_session: Session) -> None:
+    opportunity = _make_opportunity(
+        db_session, buy_price=Decimal("100000"), sell_price=Decimal("200000")
+    )
+    result = validate_opportunity(db_session, opportunity)
+    price_check = next(c for c in result.checks if c.name == "price_competitive")
+    assert price_check.passed is None
+
+
+def test_price_competitive_passes_when_no_real_competition(db_session: Session) -> None:
+    opportunity = _make_opportunity(
+        db_session, buy_price=Decimal("100000"), sell_price=Decimal("200000")
+    )
+    db_session.add(
+        MarketGapSnapshot(
+            catalog_product_id="MCO1",
+            opportunity_id=opportunity.id,
+            seller_count=0,
+            buy_box_price=None,
+            stock_available=False,
+        )
+    )
+    db_session.commit()
+
+    result = validate_opportunity(db_session, opportunity)
+    price_check = next(c for c in result.checks if c.name == "price_competitive")
+    assert price_check.passed is True
+
+
+def test_price_competitive_fails_when_priced_above_real_buy_box_winner(
+    db_session: Session,
+) -> None:
+    opportunity = _make_opportunity(
+        db_session, buy_price=Decimal("100000"), sell_price=Decimal("250000")
+    )
+    db_session.add(
+        MarketGapSnapshot(
+            catalog_product_id="MCO1",
+            opportunity_id=opportunity.id,
+            seller_count=3,
+            buy_box_price=Decimal("200000"),
+            stock_available=True,
+        )
+    )
+    db_session.commit()
+
+    result = validate_opportunity(db_session, opportunity)
+    price_check = next(c for c in result.checks if c.name == "price_competitive")
+    assert price_check.passed is False
+    assert result.overall_passed is False
+    assert "200000" in price_check.detail
+
+
+def test_price_competitive_passes_when_priced_at_or_below_real_buy_box_winner(
+    db_session: Session,
+) -> None:
+    opportunity = _make_opportunity(
+        db_session, buy_price=Decimal("100000"), sell_price=Decimal("150000")
+    )
+    db_session.add(
+        MarketGapSnapshot(
+            catalog_product_id="MCO1",
+            opportunity_id=opportunity.id,
+            seller_count=3,
+            buy_box_price=Decimal("200000"),
+            stock_available=True,
+        )
+    )
+    db_session.commit()
+
+    result = validate_opportunity(db_session, opportunity)
+    price_check = next(c for c in result.checks if c.name == "price_competitive")
+    assert price_check.passed is True
 
 
 def test_stock_none_is_not_applicable(db_session: Session) -> None:
