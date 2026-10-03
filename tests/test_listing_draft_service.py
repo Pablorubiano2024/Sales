@@ -4,6 +4,7 @@ pattern as tests/test_category_lookup.py."""
 
 from __future__ import annotations
 
+import json
 from decimal import Decimal
 
 import httpx
@@ -225,8 +226,10 @@ def test_generate_draft_still_blocks_a_real_gtin_requirement(db_session: Session
     (2026-10-03) proved supplying EMPTY_GTIN_REASON does NOT satisfy a
     real GTIN requirement — MercadoLibre rejected it with
     item.attribute.missing_conditional_required, citing GTIN specifically.
-    generate_draft must never treat GTIN as coverable, regardless of
-    whether EMPTY_GTIN_REASON is also present on the category."""
+    generate_draft now asks MercadoLibre's own real per-item
+    `/attributes/conditional` check (brand="Holstein", the real live()
+    fixture's brand) — this test's mock says GTIN is still required for
+    that brand, so the category must still be blocked."""
     opportunity = _make_opportunity(db_session)
     live = _live()
 
@@ -250,23 +253,61 @@ def test_generate_draft_still_blocks_a_real_gtin_requirement(db_session: Session
                         # this as a normal matchable attribute.
                         "tags": {"multivalued": True, "conditional_required": True},
                     },
-                    {
-                        "id": "EMPTY_GTIN_REASON",
-                        "value_type": "list",
-                        "tags": {"conditional_required": True},
-                        "values": [
-                            {"id": "17055160", "name": "El producto no tiene código registrado"},
-                            {"id": "17055161", "name": "Otra razón"},
-                        ],
-                    },
                 ],
             )
+        if request.url.path == "/categories/MCO14903/attributes/conditional":
+            assert request.method == "POST"
+            return httpx.Response(200, json={"required_attributes": [{"id": "GTIN"}]})
         raise AssertionError(f"unexpected request: {request.url}")
 
     with _client(handler) as ml_public_client:
         result = generate_draft(db_session, opportunity, live, ml_public_client=ml_public_client)
 
     assert isinstance(result, DraftGenerationError)
+
+
+def test_generate_draft_allows_a_category_when_gtin_not_really_required_for_this_brand(
+    db_session: Session,
+) -> None:
+    """Confirmed live 2026-10-03: GTIN's real per-item requirement is
+    brand+category-specific — e.g. required for Electrolux freidoras but
+    NOT for KALLEY/IMUSA/generic-brand ones, same category. This test's
+    mock says GTIN isn't required for this product's real brand
+    ("Holstein", from the `_live()` fixture), so the category must go
+    through even though GTIN is conditional_required on the category."""
+    opportunity = _make_opportunity(db_session)
+    live = _live()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/sites/MCO/domain_discovery/search":
+            return httpx.Response(
+                200, json=[{"category_id": "MCO456045", "category_name": "Freidoras"}]
+            )
+        if request.url.path == "/categories/MCO456045/attributes":
+            return httpx.Response(
+                200,
+                json=[
+                    {"id": "BRAND", "tags": {"required": True}},
+                    {"id": "MODEL", "tags": {"required": True}},
+                    {
+                        "id": "GTIN",
+                        "name": "Código universal de producto",
+                        "value_type": "string",
+                        "tags": {"multivalued": True, "conditional_required": True},
+                    },
+                ],
+            )
+        if request.url.path == "/categories/MCO456045/attributes/conditional":
+            assert request.method == "POST"
+            body = json.loads(request.content)
+            assert {"id": "BRAND", "value_name": "Holstein"} in body["attributes"]
+            return httpx.Response(200, json={"required_attributes": []})
+        raise AssertionError(f"unexpected request: {request.url}")
+
+    with _client(handler) as ml_public_client:
+        result = generate_draft(db_session, opportunity, live, ml_public_client=ml_public_client)
+
+    assert isinstance(result, ListingDraft)
 
 
 def test_generate_draft_is_idempotent_per_opportunity(db_session: Session) -> None:

@@ -149,22 +149,29 @@ def generate_draft(
     # required attribute this product's own real specifications actually
     # matched should count as covered, not just BRAND/MODEL. See
     # category_lookup.is_safe_to_autopublish's 2026-10-03 docstring note.
-    # (GTIN/EMPTY_GTIN_REASON deliberately never covered this way — see
-    # that same docstring for the real, live-confirmed-negative test.)
+    # (GTIN deliberately never covered this way — see that same
+    # docstring for the real, live-confirmed-negative test.)
     extra_attributes = category_lookup.match_specifications(
         category_id, live.specifications, client=ml_public_client
     )
     covered_attribute_ids = frozenset(a["id"] for a in extra_attributes)
 
+    brand = live.brand or product.brand or "Genérica"
+    model = extract_model(live.specifications) or "Genérico"
+
+    # brand/model passed through so conditional attributes (GTIN,
+    # GRADING, ...) are resolved against this real item instead of
+    # guessed — see category_lookup.required_attribute_ids's docstring.
     if not category_lookup.is_safe_to_autopublish(
-        category_id, client=ml_public_client, extra_covered_ids=covered_attribute_ids
+        category_id,
+        client=ml_public_client,
+        brand=brand,
+        model=model,
+        extra_covered_ids=covered_attribute_ids,
     ):
         return DraftGenerationError(
             f"Categoría {category_id} requiere atributos que no podemos completar automáticamente"
         )
-
-    brand = live.brand or product.brand or "Genérica"
-    model = extract_model(live.specifications) or "Genérico"
 
     specs = live.specifications[:MAX_DESCRIPTION_SPECS]
     bullets = [f"{name}: {value}" for name, value in specs[:6]]

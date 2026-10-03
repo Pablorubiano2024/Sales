@@ -4,6 +4,7 @@ shapes match domain_discovery/categories-attributes verified live
 
 from __future__ import annotations
 
+import json
 from decimal import Decimal
 
 import httpx
@@ -143,6 +144,98 @@ def test_is_safe_to_autopublish_false_when_only_some_extra_attributes_covered() 
             )
             is False
         )
+
+
+def test_real_conditional_required_ids_posts_brand_and_model() -> None:
+    """Real shape confirmed live 2026-10-03: POST
+    /categories/{id}/attributes/conditional with condition + BRAND/MODEL
+    -> {"required_attributes": [...]}. Public, no auth header sent."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "POST"
+        assert request.url.path == "/categories/MCO456045/attributes/conditional"
+        body = json.loads(request.content)
+        assert body["condition"] == "new"
+        assert {"id": "BRAND", "value_name": "Electrolux"} in body["attributes"]
+        assert {"id": "MODEL", "value_name": "EAF50"} in body["attributes"]
+        return httpx.Response(
+            200,
+            json={
+                "required_attributes": [{"id": "GTIN", "name": "Código universal de producto"}],
+                "callbacks": [],
+                "status": 200,
+            },
+        )
+
+    with _client(handler) as client:
+        result = category_lookup.real_conditional_required_ids(
+            "MCO456045", brand="Electrolux", model="EAF50", client=client
+        )
+
+    assert result == ["GTIN"]
+
+
+def test_real_conditional_required_ids_none_on_http_error() -> None:
+    """None (not []) on failure — "we don't know" must never be read as
+    "nothing required"."""
+    with _client(lambda r: httpx.Response(500)) as client:
+        result = category_lookup.real_conditional_required_ids(
+            "MCO456045", brand="Electrolux", model="EAF50", client=client
+        )
+    assert result is None
+
+
+def test_required_attribute_ids_resolves_conditional_gtin_per_real_brand() -> None:
+    """Confirmed live 2026-10-03: GTIN's real requirement is brand-
+    specific, not a blanket per-category flag — KALLEY freidoras don't
+    need it even though GTIN is conditional_required on the category."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            return httpx.Response(200, json={"required_attributes": []})
+        return httpx.Response(
+            200,
+            json=[
+                {"id": "BRAND", "tags": {"required": True}},
+                {"id": "MODEL", "tags": {"required": True}},
+                {"id": "GTIN", "tags": {"conditional_required": True}},
+            ],
+        )
+
+    with _client(handler) as client:
+        required = category_lookup.required_attribute_ids(
+            "MCO456045", client=client, brand="KALLEY", model="K-MAF35"
+        )
+        assert "GTIN" not in required
+        assert (
+            category_lookup.is_safe_to_autopublish(
+                "MCO456045", client=client, brand="KALLEY", model="K-MAF35"
+            )
+            is True
+        )
+
+
+def test_required_attribute_ids_falls_back_to_blocking_when_real_check_fails() -> None:
+    """If the real per-item check can't be reached, GTIN must still
+    block — never silently assume it's fine."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            return httpx.Response(500)
+        return httpx.Response(
+            200,
+            json=[
+                {"id": "BRAND", "tags": {"required": True}},
+                {"id": "MODEL", "tags": {"required": True}},
+                {"id": "GTIN", "tags": {"conditional_required": True}},
+            ],
+        )
+
+    with _client(handler) as client:
+        required = category_lookup.required_attribute_ids(
+            "MCO456045", client=client, brand="KALLEY", model="K-MAF35"
+        )
+        assert "GTIN" in required
 
 
 def test_required_attribute_ids_includes_conditional_required() -> None:

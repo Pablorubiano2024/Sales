@@ -72,11 +72,37 @@ the theory that GRADING's own `new_hidden: true` tag means MercadoLibre
 genuinely doesn't require it for a `condition="new"` item, the only
 condition create_listing() here ever publishes.
 `required_attribute_ids` excludes any `new_hidden` attribute for that
-reason — the one real, live-confirmed win from this investigation.
-Every real category checked this same day also requires GTIN, though,
-so this alone wasn't enough to unblock any of them in practice; it only
-helps once/if a real GTIN workaround is found, or for some future
-category that requires GRADING but not GTIN.
+reason.
+
+The user then asked to investigate declaring GTIN "at the variation
+level" (per the real error message's own hint). That led somewhere
+better: MercadoLibre has a real, public (no auth), per-item endpoint —
+`POST /categories/{id}/attributes/conditional` with
+`{"condition": "new", "attributes": [{"id": "BRAND", ...}, {"id":
+"MODEL", ...}]}` -> `{"required_attributes": [...]}` — that resolves
+conditional_required attributes FOR REAL, given the actual brand/model,
+instead of guessing from the static schema. Confirmed live 2026-10-03
+this is genuinely brand+category-specific, not a blanket per-category
+flag: GTIN came back required for Electrolux/Samsung/Whirlpool/LG/TCL/
+JBL on freidoras-with-that-one-brand/neveras/TVs/parlantes, but NOT
+required for KALLEY/IMUSA/Haceb/Acros/a made-up generic brand on
+freidoras/aspiradoras/lavadoras/cafeteras — and not even for LG on
+freidoras specifically (so it's not "well-known brand" either, it's
+genuinely this specific brand+category pair, almost certainly tied to
+how many real GTINs that brand already has on file in that category,
+per MercadoLibre's own docs). GRADING never came back required either,
+independently confirming the `new_hidden` fix above was right.
+
+`required_attribute_ids`/`is_safe_to_autopublish` now call this real
+endpoint (`real_conditional_required_ids`) whenever a real brand/model
+are available, instead of treating every `conditional_required`
+attribute as always-blocking. This is a genuine improvement over the
+2026-10-01 fix's "conservative on purpose" stance — that was actually
+just wrong for most of our real brands, not conservative; the real
+per-item check is the actual ground truth, not a guess. GTIN still
+blocks real listings for the specific brand/category pairs where
+MercadoLibre's own check says it's required (Electrolux freidoras,
+anything-TVs/neveras/parlantes) — no workaround for that is known.
 """
 
 from __future__ import annotations
@@ -115,18 +141,67 @@ def predict_category(query: str, *, client: httpx.Client) -> str | None:
     return str(category_id) if category_id else None
 
 
-def required_attribute_ids(category_id: str, *, client: httpx.Client) -> list[str]:
-    """Attribute ids that would block a real publish — both plainly
-    `required` and `conditional_required` (see module docstring for the
-    real GTIN case that made this necessary; a conditionally-required
-    attribute still rejects item creation with a real 400 when it applies,
-    and we have no way to know the condition ahead of time) — except one
-    real, knowable condition: `new_hidden` means MercadoLibre doesn't
-    apply this attribute to a `condition="new"` item, and create_listing()
-    here NEVER publishes anything else (see module docstring, GRADING).
-    Not treating `new_hidden` this way isn't "more conservative", it's
-    just wrong — it blocked real categories (parlantes, freidoras...) on
-    an attribute MercadoLibre itself says doesn't apply to our listings."""
+def real_conditional_required_ids(
+    category_id: str, *, brand: str, model: str, client: httpx.Client
+) -> list[str] | None:
+    """Ask MercadoLibre's own real per-item check
+    (`POST /categories/{id}/attributes/conditional`, public, no auth —
+    confirmed live 2026-10-03) which `conditional_required` attributes
+    actually apply to this exact brand/model, instead of guessing from
+    the static schema. Always sends `condition: "new"` — the only
+    condition create_listing() here ever publishes. Returns None (not an
+    empty list — "we don't know" is not "nothing required") on any HTTP
+    error, so callers fall back to treating every conditional_required
+    attribute as blocking rather than silently trust an empty result."""
+    try:
+        response = client.post(
+            f"/categories/{category_id}/attributes/conditional",
+            json={
+                "condition": "new",
+                "attributes": [
+                    {"id": "BRAND", "value_name": brand},
+                    {"id": "MODEL", "value_name": model},
+                ],
+            },
+        )
+        response.raise_for_status()
+        data = response.json()
+    except httpx.HTTPError as exc:
+        logger.warning(
+            "categories/%s/attributes/conditional(brand=%r, model=%r) failed: %s",
+            category_id,
+            brand,
+            model,
+            exc,
+        )
+        return None
+    return [a["id"] for a in data.get("required_attributes") or []]
+
+
+def required_attribute_ids(
+    category_id: str,
+    *,
+    client: httpx.Client,
+    brand: str | None = None,
+    model: str | None = None,
+) -> list[str]:
+    """Attribute ids that would block a real publish for this specific
+    item: plainly `required` attributes (always, from the static
+    schema), plus whichever `conditional_required` attributes are
+    actually required for this exact brand/model per
+    `real_conditional_required_ids` — confirmed live 2026-10-03 this is
+    genuinely brand+category-specific (GTIN required for Electrolux
+    freidoras, not for KALLEY/IMUSA/generic-brand freidoras; required for
+    every brand checked on TVs/neveras/parlantes), so treating every
+    conditional_required attribute as a blanket "always blocks" (the
+    2026-10-01 fix) was wrong, not conservative. Falls back to that old
+    blanket behavior only when `brand`/`model` aren't given yet, or the
+    real check call itself fails — never silently assumes nothing is
+    required. `new_hidden` attributes (e.g. GRADING) are excluded
+    outright: MercadoLibre doesn't apply them to a `condition="new"`
+    item, and that's the only condition create_listing() here ever
+    publishes — independently confirmed by the same real per-item check
+    never returning GRADING as required."""
     try:
         response = client.get(f"/categories/{category_id}/attributes")
         response.raise_for_status()
@@ -134,32 +209,45 @@ def required_attribute_ids(category_id: str, *, client: httpx.Client) -> list[st
     except httpx.HTTPError as exc:
         logger.warning("categories/%s/attributes failed: %s", category_id, exc)
         return []
-    return [
-        a["id"]
-        for a in attributes
-        if not (a.get("tags") or {}).get("new_hidden")
-        and (
-            (a.get("tags") or {}).get("required")
-            or (a.get("tags") or {}).get("conditional_required")
-        )
-    ]
+
+    not_new_hidden = [a for a in attributes if not (a.get("tags") or {}).get("new_hidden")]
+    plain_required = [a["id"] for a in not_new_hidden if (a.get("tags") or {}).get("required")]
+    conditional_ids = {
+        a["id"] for a in not_new_hidden if (a.get("tags") or {}).get("conditional_required")
+    }
+
+    if not conditional_ids:
+        return plain_required
+    if brand is None or model is None:
+        return [*plain_required, *conditional_ids]
+
+    really_required = real_conditional_required_ids(
+        category_id, brand=brand, model=model, client=client
+    )
+    if really_required is None:
+        return [*plain_required, *conditional_ids]
+    return [*plain_required, *(conditional_ids & set(really_required))]
 
 
 def is_safe_to_autopublish(
     category_id: str,
     *,
     client: httpx.Client,
+    brand: str | None = None,
+    model: str | None = None,
     extra_covered_ids: frozenset[str] = frozenset(),
 ) -> bool:
-    """True when every required attribute for this category is either one
-    create_listing() already supplies (BRAND, MODEL) or one the caller has
-    already confirmed it can fill with a real, matched value —
-    `extra_covered_ids` is meant to be the attribute ids
+    """True when every required attribute for this category/item is
+    either one create_listing() already supplies (BRAND, MODEL) or one
+    the caller has already confirmed it can fill with a real, matched
+    value — `extra_covered_ids` is meant to be the attribute ids
     `match_specifications` actually matched for this specific product
     (never a blanket "this category has a match_specifications entry
-    somewhere" check). Never GTIN: see module docstring for the real,
-    live-confirmed-negative test of the one real-looking way out."""
-    required = required_attribute_ids(category_id, client=client)
+    somewhere" check). Pass the real `brand`/`model` so
+    `required_attribute_ids` can resolve conditional attributes (GTIN,
+    GRADING, ...) against this exact item rather than guessing — see
+    module docstring for what that changed live."""
+    required = required_attribute_ids(category_id, client=client, brand=brand, model=model)
     return set(required) <= (SAFE_ATTRIBUTE_IDS | extra_covered_ids)
 
 
