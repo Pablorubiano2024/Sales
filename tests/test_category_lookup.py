@@ -177,6 +177,40 @@ def test_required_attribute_ids_includes_conditional_required() -> None:
         assert category_lookup.is_safe_to_autopublish("MCO456045", client=client) is False
 
 
+def test_required_attribute_ids_excludes_new_hidden_attributes() -> None:
+    """Real bug found live 2026-10-03: GRADING is conditional_required on
+    nearly every real category (TVs, neveras, parlantes, freidoras...)
+    but its own real tags include new_hidden: true — MercadoLibre doesn't
+    apply it to a condition="new" item, which is the only condition
+    create_listing() here ever publishes. Treating it as blocking anyway
+    was wrong, not conservative — it was skipping real categories
+    (parlantes: MCO3691/MCO11860) that have NO other required attribute
+    beyond BRAND/MODEL/GTIN once this is excluded."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=[
+                {"id": "BRAND", "tags": {"required": True}},
+                {"id": "MODEL", "tags": {"required": True}},
+                {
+                    "id": "GRADING",
+                    "tags": {
+                        "used_hidden": True,
+                        "conditional_required": True,
+                        "new_hidden": True,
+                        "open_box_hidden": True,
+                    },
+                },
+            ],
+        )
+
+    with _client(handler) as client:
+        required = category_lookup.required_attribute_ids("MCO3691", client=client)
+        assert "GRADING" not in required
+        assert category_lookup.is_safe_to_autopublish("MCO3691", client=client) is True
+
+
 def test_gtin_exemption_attribute_returns_the_real_exemption_value() -> None:
     """Real shape confirmed live 2026-10-03 against 5 real categories —
     EMPTY_GTIN_REASON's value id 17055160 ("El producto no tiene código

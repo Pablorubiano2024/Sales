@@ -59,8 +59,18 @@ guessed/fabricated barcode, it's the true statement of our actual
 situation (we're reselling retail, we don't have the manufacturer's real
 GTIN) — `gtin_exemption_attribute` below supplies it, and
 `is_safe_to_autopublish`'s caller treats both GTIN and EMPTY_GTIN_REASON
-as covered when it's present. Not yet verified against a real
-create_listing response — see
+as covered when it's present.
+
+That fix alone still didn't change a re-run's "Se publicarían: 0" —
+checking why against the same public endpoint found a second universal
+blocker, GRADING (also `conditional_required` on most of the same
+categories: TVs, neveras, lavadoras, freidoras, parlantes...). Unlike
+GTIN, this one isn't "no real value available" — GRADING's own real tags
+include `new_hidden: true`, meaning MercadoLibre doesn't consider it
+required for a `condition="new"` item, which is the only condition
+create_listing() here ever publishes. `required_attribute_ids` now
+excludes any `new_hidden` attribute for that reason. Not yet verified
+against a real create_listing response — see
 scripts/publish_approved_opportunities.py for the live confirmation
 test before trusting this broadly.
 """
@@ -112,7 +122,13 @@ def required_attribute_ids(category_id: str, *, client: httpx.Client) -> list[st
     `required` and `conditional_required` (see module docstring for the
     real GTIN case that made this necessary; a conditionally-required
     attribute still rejects item creation with a real 400 when it applies,
-    and we have no way to know the condition ahead of time)."""
+    and we have no way to know the condition ahead of time) — except one
+    real, knowable condition: `new_hidden` means MercadoLibre doesn't
+    apply this attribute to a `condition="new"` item, and create_listing()
+    here NEVER publishes anything else (see module docstring, GRADING).
+    Not treating `new_hidden` this way isn't "more conservative", it's
+    just wrong — it blocked real categories (parlantes, freidoras...) on
+    an attribute MercadoLibre itself says doesn't apply to our listings."""
     try:
         response = client.get(f"/categories/{category_id}/attributes")
         response.raise_for_status()
@@ -123,8 +139,11 @@ def required_attribute_ids(category_id: str, *, client: httpx.Client) -> list[st
     return [
         a["id"]
         for a in attributes
-        if (a.get("tags") or {}).get("required")
-        or (a.get("tags") or {}).get("conditional_required")
+        if not (a.get("tags") or {}).get("new_hidden")
+        and (
+            (a.get("tags") or {}).get("required")
+            or (a.get("tags") or {}).get("conditional_required")
+        )
     ]
 
 
