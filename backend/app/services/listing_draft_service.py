@@ -149,22 +149,15 @@ def generate_draft(
     # required attribute this product's own real specifications actually
     # matched should count as covered, not just BRAND/MODEL. See
     # category_lookup.is_safe_to_autopublish's 2026-10-03 docstring note.
+    # (GTIN/EMPTY_GTIN_REASON deliberately never covered this way — see
+    # that same docstring for the real, live-confirmed-negative test.)
     extra_attributes = category_lookup.match_specifications(
         category_id, live.specifications, client=ml_public_client
     )
-    covered_attribute_ids = {a["id"] for a in extra_attributes}
-
-    # GTIN/EMPTY_GTIN_REASON is conditional_required on nearly every real
-    # category and no retail source ever gives us a real GTIN — supplying
-    # the real "no registered code" exemption instead covers both ids
-    # (see category_lookup.gtin_exemption_attribute's docstring).
-    gtin_exemption = category_lookup.gtin_exemption_attribute(category_id, client=ml_public_client)
-    if gtin_exemption is not None:
-        extra_attributes = [*extra_attributes, gtin_exemption]
-        covered_attribute_ids |= {"GTIN", "EMPTY_GTIN_REASON"}
+    covered_attribute_ids = frozenset(a["id"] for a in extra_attributes)
 
     if not category_lookup.is_safe_to_autopublish(
-        category_id, client=ml_public_client, extra_covered_ids=frozenset(covered_attribute_ids)
+        category_id, client=ml_public_client, extra_covered_ids=covered_attribute_ids
     ):
         return DraftGenerationError(
             f"Categoría {category_id} requiere atributos que no podemos completar automáticamente"

@@ -49,30 +49,34 @@ public `/categories/{id}/attributes` directly (2026-10-03) showed the
 REAL universal blocker isn't category-specific attributes at all — it's
 GTIN (`conditional_required` on every one of 6 real categories checked:
 TVs, neveras, lavadoras, parlantes, microondas, freidoras), which no
-retail source ever gives us. But MercadoLibre itself offers a real,
-honest way out: `EMPTY_GTIN_REASON` (also `conditional_required` on the
-same categories) is a real `list` attribute whose value id `17055158`
-`17055159` `17055160` `17055161` each mean something — the real one for
-us is `17055160` ("El producto no tiene código registrado"), confirmed
-present with the exact same id on 5 real categories live. That's not a
-guessed/fabricated barcode, it's the true statement of our actual
-situation (we're reselling retail, we don't have the manufacturer's real
-GTIN) — `gtin_exemption_attribute` below supplies it, and
-`is_safe_to_autopublish`'s caller treats both GTIN and EMPTY_GTIN_REASON
-as covered when it's present.
+retail source ever gives us. MercadoLibre's schema makes `EMPTY_GTIN_REASON`
+look like a real, honest way out — a `list` attribute with a value id
+(`17055160`, "El producto no tiene código registrado") that reads like
+exactly our situation — so this was tried: supply
+`{"id": "EMPTY_GTIN_REASON", "value_id": "17055160"}` instead of a real
+GTIN. **A real `--confirm` publish attempt against category MCO11860
+(2026-10-03) proved this wrong**: MercadoLibre rejected it with the
+exact same `item.attribute.missing_conditional_required` error, citing
+GTIN specifically, EMPTY_GTIN_REASON having made no difference. So GTIN
+is a genuinely hard requirement wherever it's conditional_required —
+`is_safe_to_autopublish` never treats it as coverable, and no
+`gtin_exemption_attribute`-style helper exists here anymore; don't
+re-add one without a real, different, live-confirmed submission shape
+(e.g. the error message's own hint about variation-level attributes,
+untested here).
 
-That fix alone still didn't change a re-run's "Se publicarían: 0" —
-checking why against the same public endpoint found a second universal
-blocker, GRADING (also `conditional_required` on most of the same
-categories: TVs, neveras, lavadoras, freidoras, parlantes...). Unlike
-GTIN, this one isn't "no real value available" — GRADING's own real tags
-include `new_hidden: true`, meaning MercadoLibre doesn't consider it
-required for a `condition="new"` item, which is the only condition
-create_listing() here ever publishes. `required_attribute_ids` now
-excludes any `new_hidden` attribute for that reason. Not yet verified
-against a real create_listing response — see
-scripts/publish_approved_opportunities.py for the live confirmation
-test before trusting this broadly.
+Checking the same failed real response confirmed a second fix WAS
+correct: GRADING (also `conditional_required` on most of the same
+categories) was never mentioned in that 400 — only GTIN was — matching
+the theory that GRADING's own `new_hidden: true` tag means MercadoLibre
+genuinely doesn't require it for a `condition="new"` item, the only
+condition create_listing() here ever publishes.
+`required_attribute_ids` excludes any `new_hidden` attribute for that
+reason — the one real, live-confirmed win from this investigation.
+Every real category checked this same day also requires GTIN, though,
+so this alone wasn't enough to unblock any of them in practice; it only
+helps once/if a real GTIN workaround is found, or for some future
+category that requires GRADING but not GTIN.
 """
 
 from __future__ import annotations
@@ -93,12 +97,6 @@ SAFE_ATTRIBUTE_IDS = {"BRAND", "MODEL"}
 # Attribute ids already handled by dedicated create_listing() params —
 # never re-add them via matched specifications.
 _HANDLED_ELSEWHERE = {"BRAND", "MODEL", "ITEM_CONDITION"}
-# EMPTY_GTIN_REASON's real value id for "El producto no tiene código
-# registrado" (the product has no registered code) — confirmed the exact
-# same id live across 5 real categories (see module docstring). This is
-# a true statement, not a guess: this platform resells retail products,
-# none of which come with the manufacturer's real GTIN on file.
-GTIN_EXEMPTION_VALUE_ID = "17055160"
 
 
 def predict_category(query: str, *, client: httpx.Client) -> str | None:
@@ -159,27 +157,10 @@ def is_safe_to_autopublish(
     `extra_covered_ids` is meant to be the attribute ids
     `match_specifications` actually matched for this specific product
     (never a blanket "this category has a match_specifications entry
-    somewhere" check), plus GTIN/EMPTY_GTIN_REASON when the caller is
-    about to supply `gtin_exemption_attribute`'s real exemption value —
-    never GTIN on its own, since no source ever gives us a real one."""
+    somewhere" check). Never GTIN: see module docstring for the real,
+    live-confirmed-negative test of the one real-looking way out."""
     required = required_attribute_ids(category_id, client=client)
     return set(required) <= (SAFE_ATTRIBUTE_IDS | extra_covered_ids)
-
-
-def gtin_exemption_attribute(category_id: str, *, client: httpx.Client) -> dict[str, str] | None:
-    """`{"id": "EMPTY_GTIN_REASON", "value_id": GTIN_EXEMPTION_VALUE_ID}`
-    when this category's real EMPTY_GTIN_REASON attribute actually offers
-    that exact value id (see module docstring) — None when the category
-    has no EMPTY_GTIN_REASON attribute at all, or its real value list
-    doesn't include this id, rather than send it blind."""
-    attributes = list_attributes(category_id, client=client)
-    empty_gtin_reason = next((a for a in attributes if a["id"] == "EMPTY_GTIN_REASON"), None)
-    if empty_gtin_reason is None:
-        return None
-    real_value_ids = {v["id"] for v in (empty_gtin_reason.get("values") or [])}
-    if GTIN_EXEMPTION_VALUE_ID not in real_value_ids:
-        return None
-    return {"id": "EMPTY_GTIN_REASON", "value_id": GTIN_EXEMPTION_VALUE_ID}
 
 
 def get_sale_commission_pct(

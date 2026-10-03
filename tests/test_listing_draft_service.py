@@ -4,7 +4,6 @@ pattern as tests/test_category_lookup.py."""
 
 from __future__ import annotations
 
-import json
 from decimal import Decimal
 
 import httpx
@@ -221,16 +220,13 @@ def test_generate_draft_allows_a_required_attribute_covered_by_real_specs(
     assert isinstance(result, ListingDraft)
 
 
-def test_generate_draft_covers_gtin_via_the_real_empty_gtin_reason_exemption(
-    db_session: Session,
-) -> None:
-    """2026-10-03 fix: GTIN is conditional_required on nearly every real
-    category and no retail source ever gives us a real one — confirmed
-    live this was blocking ALL 73 real "approved" opportunities even
-    after the match_specifications gate fix above. Supplying the real
-    EMPTY_GTIN_REASON exemption (not a guessed barcode) must let this
-    category through and the exemption attribute must end up on the
-    draft, ready for the real publish to send."""
+def test_generate_draft_still_blocks_a_real_gtin_requirement(db_session: Session) -> None:
+    """A real --confirm publish attempt against category MCO11860
+    (2026-10-03) proved supplying EMPTY_GTIN_REASON does NOT satisfy a
+    real GTIN requirement — MercadoLibre rejected it with
+    item.attribute.missing_conditional_required, citing GTIN specifically.
+    generate_draft must never treat GTIN as coverable, regardless of
+    whether EMPTY_GTIN_REASON is also present on the category."""
     opportunity = _make_opportunity(db_session)
     live = _live()
 
@@ -270,9 +266,7 @@ def test_generate_draft_covers_gtin_via_the_real_empty_gtin_reason_exemption(
     with _client(handler) as ml_public_client:
         result = generate_draft(db_session, opportunity, live, ml_public_client=ml_public_client)
 
-    assert isinstance(result, ListingDraft)
-    extra = json.loads(result.attributes or "{}")["extra"]
-    assert {"id": "EMPTY_GTIN_REASON", "value_id": "17055160"} in extra
+    assert isinstance(result, DraftGenerationError)
 
 
 def test_generate_draft_is_idempotent_per_opportunity(db_session: Session) -> None:
