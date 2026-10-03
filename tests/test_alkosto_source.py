@@ -15,12 +15,36 @@ import httpx
 
 from backend.app.integrations.alkosto_source import AlkostoSourceAdapter, KtronixSourceAdapter
 
+SPEC_TABLE_HTML = """
+<div class="new-container__table__classifications___type__item">
+  <div class="...item_feature js-comparableAttributes-data memoria_interna"
+       data-attribute-code="memoria_interna_de_la_tableta"
+       data-attribute-name="Capacidad de Almacenamiento" data-attribute-action="">
+    Capacidad de Almacenamiento</div>
+  <div class="new-container__table__classifications___type__item_result"> 128 GB&nbsp </div>
+</div>
+<div class="new-container__table__classifications___type__item">
+  <div class="...item_feature js-comparableAttributes-data nucleos"
+       data-attribute-code="nucleos_procesador"
+       data-attribute-name="Núcleos del Procesador" data-attribute-action="">
+    Núcleos del Procesador</div>
+  <div class="new-container__table__classifications___type__item_result"> 8&nbsp Nucleos</div>
+</div>
+<div class="new-container__table__classifications___type__item">
+  <div class="...item_feature js-comparableAttributes-data empty_spec"
+       data-attribute-code="empty_spec" data-attribute-name="Resolucion Camara Frontal"
+       data-attribute-action="">Resolucion Camara Frontal</div>
+  <div class="new-container__table__classifications___type__item_result"></div>
+</div>
+"""
+
 
 def _product_html(
     *,
     price: str = "4709010.0",
     availability: str = "InStock",
     base_price_html: str = "",
+    spec_html: str = "",
 ) -> str:
     return f"""
     <html><head>
@@ -42,6 +66,7 @@ def _product_html(
       </div>
     </div>
     <h1 class="js-main-title" itemprop="name">iPad Air 13&#34; Pulgadas 128GB Chip M4 WiFi Azul</h1>
+    {spec_html}
     </body></html>
     """
 
@@ -76,6 +101,21 @@ def test_get_product_parses_real_offer_microdata() -> None:
     assert product.brand == "APPLE"
     assert product.image_urls == ("https://www.alkosto.com/medias/195950797978-001.webp",)
     assert product.reference_price is None
+    assert product.specifications == ()
+
+
+def test_get_product_parses_the_real_specifications_table() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, html=_product_html(spec_html=SPEC_TABLE_HTML))
+
+    with _adapter(handler) as adapter:
+        product = adapter.get_product("195950797978")
+
+    assert product is not None
+    assert product.specifications == (
+        ("Capacidad de Almacenamiento", "128 GB"),
+        ("Núcleos del Procesador", "8 Nucleos"),
+    )
 
 
 def test_get_product_detects_a_real_active_discount() -> None:

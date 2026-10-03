@@ -48,9 +48,18 @@ Checked before writing this (2026-10-02):
     has a confirmed site bug (the CDN url is concatenated onto the
     site's own domain, e.g. "https://www.alkosto.comhttps://cdn.dam...")
     on both sites, so this adapter uses the clean `og:image` meta tag
-    instead. No specifications table was found in the static HTML (the
-    "especificaciones" panel appears to be client-rendered) — left as ()
-    rather than guessed.
+    instead.
+
+    A real specifications table (not client-rendered — missed on the
+    first pass over this page, since the hidden `#modalTableSpecs`
+    trigger is a red herring: that modal's content loads elsewhere on
+    the same page) IS present in the static HTML, confirmed live on an
+    iPad (24 real specs) and a licuadora (18 real specs): each row is
+    `<div ... data-attribute-name="Capacidad de Almacenamiento" ...>
+    Capacidad de Almacenamiento</div><div class="...item_result">
+    128 GB&nbsp </div>` — note the real site bug of a literal "&nbsp"
+    with no trailing semicolon, used inconsistently as a mid-string
+    space too (e.g. "8&nbsp Nucleos"), normalized to a plain space here.
 """
 
 from __future__ import annotations
@@ -97,6 +106,34 @@ _BRAND_RE = re.compile(
 )
 _BASE_PRICE_RE = re.compile(r'before-price__basePrice">\s*\$?\s*([0-9.,]+)')
 _OG_IMAGE_RE = re.compile(r'<meta property="og:image" content="([^"]+)"')
+_SPEC_ITEM_RE = re.compile(
+    r'data-attribute-name="([^"]+)"[^>]*>[^<]*</div>\s*<div[^>]*>([^<]*)</div>'
+)
+# A real max, not a guess — the longest genuine value seen live (a legal
+# disclaimer sentence) was ~110 chars; this just guards against some other
+# product page's spec table containing something pathological.
+_MAX_SPEC_VALUE_LENGTH = 300
+
+
+def _clean_spec_text(raw: str) -> str:
+    # The real site has a confirmed bug: a literal "&nbsp" with no
+    # trailing semicolon, sometimes used mid-string as a plain space
+    # (e.g. "8&nbsp Nucleos") — see module docstring.
+    unescaped = html.unescape(raw.replace("&nbsp;", " ").replace("&nbsp", " "))
+    return re.sub(r"\s+", " ", unescaped).strip()
+
+
+def _extract_specifications(page: str) -> tuple[tuple[str, str], ...]:
+    seen: set[str] = set()
+    specs: list[tuple[str, str]] = []
+    for raw_name, raw_value in _SPEC_ITEM_RE.findall(page):
+        name = _clean_spec_text(raw_name)
+        value = _clean_spec_text(raw_value)
+        if not name or not value or name in seen or len(value) > _MAX_SPEC_VALUE_LENGTH:
+            continue
+        seen.add(name)
+        specs.append((name, value))
+    return tuple(specs)
 
 
 def _to_decimal(raw: str) -> Decimal | None:
@@ -268,6 +305,7 @@ class AlkostoSourceAdapter(SourceAdapter):
             reference_price=reference_price,
             image_urls=image_urls,
             brand=brand,
+            specifications=_extract_specifications(page),
         )
 
     def get_price(self, external_id: str) -> Decimal | None:
