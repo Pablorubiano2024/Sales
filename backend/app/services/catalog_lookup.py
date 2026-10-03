@@ -40,6 +40,25 @@ accessory price) into an opportunity actually priced at $1,199,900.
 `find_catalog_product` below rejects a match whose name doesn't share
 enough real words with the query (see `_MIN_TOKEN_OVERLAP_RATIO`) rather
 than trust a plausible-looking but wrong catalog_product_id.
+
+Real finding 2026-10-03 (chasing why GTIN blocks real brands like LG/
+Samsung/TCL but not KALLEY/IMUSA — see category_lookup.py's docstring):
+some real `/products/search` results already carry a real, manufacturer-
+registered `GTIN` attribute with one or more real barcode values (e.g.
+a real "Parlante LG XBOOM Go" search result's GTIN had
+`value_name: "8806098242597, 719192620131, 8806098297139"`) — this is
+genuine data, not something to guess. The product DETAIL endpoint
+(`GET /products/{id}`) does NOT expose this same attribute, only the
+search result does, so `find_catalog_gtin` reads it from a fresh
+`/products/search` call rather than from `find_catalog_product`'s
+already-fetched result (kept as two separate single-purpose calls,
+matching this module's existing style, rather than threading one
+result through both). NOT yet confirmed whether supplying this real
+value actually satisfies a real `create_listing` GTIN requirement —
+MercadoLibre's own `/categories/{id}/attributes/conditional` check
+(category_lookup.py) returns the identical "GTIN required" result
+regardless of what's passed for GTIN, so it can't validate this; only a
+real publish attempt can.
 """
 
 from __future__ import annotations
@@ -132,6 +151,42 @@ def find_catalog_product(query: str, *, client: httpx.Client, access_token: str)
 
     catalog_product_id = top.get("catalog_product_id") or top.get("id")
     return str(catalog_product_id) if catalog_product_id else None
+
+
+def find_catalog_gtin(query: str, *, client: httpx.Client, access_token: str) -> str | None:
+    """A real, manufacturer-registered GTIN MercadoLibre's own catalog
+    already has on file for this product, if any (see module docstring
+    for a confirmed real example) — never a guessed/fabricated barcode.
+    None when nothing plausibly matches (same rule as
+    `find_catalog_product`) or the top match has no real GTIN on file —
+    that's a genuine "we don't have one", not a failure to try harder."""
+    try:
+        response = _get_with_retry(
+            client,
+            "/products/search",
+            params={"site_id": "MCO", "q": query},
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        response.raise_for_status()
+        results = response.json().get("results", [])
+    except httpx.HTTPError as exc:
+        logger.warning("products/search(%r) failed: %s", query, exc)
+        return None
+    if not results:
+        return None
+
+    top = results[0]
+    if not _is_plausible_match(query, top.get("name", "")):
+        return None
+
+    gtin_attribute = next((a for a in top.get("attributes") or [] if a.get("id") == "GTIN"), None)
+    if gtin_attribute is None:
+        return None
+    values = gtin_attribute.get("values") or []
+    if not values:
+        return None
+    gtin = values[0].get("name")
+    return str(gtin) if gtin else None
 
 
 @dataclass(frozen=True, slots=True)

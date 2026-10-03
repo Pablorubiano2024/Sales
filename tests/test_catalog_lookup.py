@@ -112,6 +112,93 @@ def test_find_catalog_product_accepts_a_plausible_match() -> None:
     assert result == "MCO99999999"
 
 
+def test_find_catalog_gtin_reads_the_real_value_from_search_results() -> None:
+    """Real shape confirmed live 2026-10-03 against a real
+    "Parlante LG XBOOM Go" /products/search result."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/products/search"
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {
+                        "catalog_product_id": "MCO45056356",
+                        "name": "Parlante LG XBOOM Go XBOOM",
+                        "attributes": [
+                            {"id": "BRAND", "value_name": "LG"},
+                            {
+                                "id": "GTIN",
+                                "value_name": "8806098242597, 719192620131, 8806098297139",
+                                "values": [
+                                    {"id": "15996658", "name": "8806098242597"},
+                                    {"id": "14644221", "name": "719192620131"},
+                                    {"id": "25411522", "name": "8806098297139"},
+                                ],
+                            },
+                        ],
+                    }
+                ]
+            },
+        )
+
+    with _client(handler) as client:
+        result = catalog_lookup.find_catalog_gtin(
+            "Parlante LG XBOOM Go", client=client, access_token="t"
+        )
+    assert result == "8806098242597"
+
+
+def test_find_catalog_gtin_none_when_the_real_match_has_no_gtin() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {
+                        "catalog_product_id": "MCO1",
+                        "name": "Freidora de Aire KALLEY 3.5Litros K-MAF35",
+                        "attributes": [{"id": "BRAND", "value_name": "KALLEY"}],
+                    }
+                ]
+            },
+        )
+
+    with _client(handler) as client:
+        result = catalog_lookup.find_catalog_gtin(
+            "Freidora de Aire KALLEY 3.5Litros K-MAF35", client=client, access_token="t"
+        )
+    assert result is None
+
+
+def test_find_catalog_gtin_none_when_top_result_is_not_a_plausible_match() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {
+                        "catalog_product_id": "MCO1",
+                        "name": "Totally unrelated replacement part",
+                        "attributes": [{"id": "GTIN", "values": [{"id": "1", "name": "123"}]}],
+                    }
+                ]
+            },
+        )
+
+    with _client(handler) as client:
+        result = catalog_lookup.find_catalog_gtin(
+            "Parlante LG XBOOM Go", client=client, access_token="t"
+        )
+    assert result is None
+
+
+def test_find_catalog_gtin_none_on_http_error() -> None:
+    with _client(lambda r: httpx.Response(403)) as client:
+        result = catalog_lookup.find_catalog_gtin("anything", client=client, access_token="t")
+    assert result is None
+
+
 def test_get_buy_box_snapshot_reads_first_result_as_winner() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/products/MCO27172667/items"

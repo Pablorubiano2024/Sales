@@ -14,6 +14,17 @@ in Streamlit before it's published, but since the user asked for fully
 automatic publishing (no click required), the real publish loop doesn't
 wait on `approve_draft` — it only ever respects an explicit REJECTED
 status (a human override), never auto-regenerating/republishing over one.
+
+GTIN (2026-10-03): `category_lookup.required_attribute_ids` resolves
+GTIN against the real per-item check — it's genuinely only required for
+some brand/category pairs (e.g. LG/Samsung/TCL/Whirlpool on TVs/
+neveras/parlantes), not a blanket block. When it IS required,
+`catalog_lookup.find_catalog_gtin` is tried: MercadoLibre's own catalog
+sometimes already has a real, manufacturer-registered GTIN on file for
+that exact product — never a guessed/fabricated barcode. Not yet
+confirmed whether supplying it actually satisfies a real `create_listing`
+call (the diagnostic endpoint can't tell us that); the next real
+`--confirm` test is what settles it.
 """
 
 from __future__ import annotations
@@ -35,7 +46,7 @@ from backend.app.integrations.imusa_source import ImusaSourceAdapter, JumboSourc
 from backend.app.models.listing_draft import ListingDraft, ListingDraftStatus
 from backend.app.models.opportunity import Opportunity
 from backend.app.models.source import Source, SourceProduct
-from backend.app.services import category_lookup
+from backend.app.services import catalog_lookup, category_lookup
 
 logger = get_logger(__name__)
 
@@ -162,13 +173,22 @@ def generate_draft(
     # brand/model passed through so conditional attributes (GTIN,
     # GRADING, ...) are resolved against this real item instead of
     # guessed — see category_lookup.required_attribute_ids's docstring.
-    if not category_lookup.is_safe_to_autopublish(
-        category_id,
-        client=ml_public_client,
-        brand=brand,
-        model=model,
-        extra_covered_ids=covered_attribute_ids,
-    ):
+    required_now = category_lookup.required_attribute_ids(
+        category_id, client=ml_public_client, brand=brand, model=model
+    )
+
+    # GTIN is only genuinely required for some brand/category pairs (see
+    # category_lookup docstring) — when it is, try a real one already on
+    # file in MercadoLibre's own catalog before giving up on this item.
+    if "GTIN" in required_now and "GTIN" not in covered_attribute_ids and access_token is not None:
+        real_gtin = catalog_lookup.find_catalog_gtin(
+            real_name, client=ml_public_client, access_token=access_token
+        )
+        if real_gtin is not None:
+            extra_attributes = [*extra_attributes, {"id": "GTIN", "value_name": real_gtin}]
+            covered_attribute_ids = covered_attribute_ids | {"GTIN"}
+
+    if not set(required_now) <= (category_lookup.SAFE_ATTRIBUTE_IDS | covered_attribute_ids):
         return DraftGenerationError(
             f"Categoría {category_id} requiere atributos que no podemos completar automáticamente"
         )

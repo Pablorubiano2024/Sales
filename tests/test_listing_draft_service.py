@@ -310,6 +310,120 @@ def test_generate_draft_allows_a_category_when_gtin_not_really_required_for_this
     assert isinstance(result, ListingDraft)
 
 
+def test_generate_draft_covers_gtin_with_a_real_catalog_value(db_session: Session) -> None:
+    """2026-10-03: when GTIN really is required (e.g. LG on parlantes)
+    and MercadoLibre's own catalog already has a real GTIN on file for
+    this exact product, generate_draft must use it — never invent one,
+    but also never give up when a real value genuinely exists."""
+    opportunity = _make_opportunity(db_session)
+    live = _live(name="Parlante LG XBOOM Go", brand="LG")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/sites/MCO/domain_discovery/search":
+            return httpx.Response(
+                200, json=[{"category_id": "MCO11860", "category_name": "Parlantes"}]
+            )
+        if request.url.path == "/categories/MCO11860/attributes":
+            return httpx.Response(
+                200,
+                json=[
+                    {"id": "BRAND", "tags": {"required": True}},
+                    {"id": "MODEL", "tags": {"required": True}},
+                    {"id": "GTIN", "tags": {"multivalued": True, "conditional_required": True}},
+                ],
+            )
+        if request.url.path == "/categories/MCO11860/attributes/conditional":
+            return httpx.Response(200, json={"required_attributes": [{"id": "GTIN"}]})
+        if request.url.path == "/products/search":
+            assert request.headers["Authorization"] == "Bearer tok123"
+            return httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {
+                            "catalog_product_id": "MCO45056356",
+                            "name": "Parlante LG XBOOM Go XBOOM",
+                            "attributes": [
+                                {
+                                    "id": "GTIN",
+                                    "values": [{"id": "15996658", "name": "8806098242597"}],
+                                }
+                            ],
+                        }
+                    ]
+                },
+            )
+        if request.url.path == "/sites/MCO/listing_prices":
+            return httpx.Response(
+                200, json=[{"listing_type_id": "gold_special", "sale_fee_amount": 0}]
+            )
+        raise AssertionError(f"unexpected request: {request.url}")
+
+    with _client(handler) as ml_public_client:
+        result = generate_draft(
+            db_session,
+            opportunity,
+            live,
+            ml_public_client=ml_public_client,
+            access_token="tok123",
+        )
+
+    assert isinstance(result, ListingDraft)
+    extra = json.loads(result.attributes or "{}")["extra"]
+    assert {"id": "GTIN", "value_name": "8806098242597"} in extra
+
+
+def test_generate_draft_still_blocks_gtin_when_catalog_has_no_real_value(
+    db_session: Session,
+) -> None:
+    """Same as above but MercadoLibre's catalog has no real GTIN for
+    this product either — must stay blocked, never guess one."""
+    opportunity = _make_opportunity(db_session)
+    live = _live(name="Parlante LG XBOOM Go", brand="LG")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/sites/MCO/domain_discovery/search":
+            return httpx.Response(
+                200, json=[{"category_id": "MCO11860", "category_name": "Parlantes"}]
+            )
+        if request.url.path == "/categories/MCO11860/attributes":
+            return httpx.Response(
+                200,
+                json=[
+                    {"id": "BRAND", "tags": {"required": True}},
+                    {"id": "MODEL", "tags": {"required": True}},
+                    {"id": "GTIN", "tags": {"multivalued": True, "conditional_required": True}},
+                ],
+            )
+        if request.url.path == "/categories/MCO11860/attributes/conditional":
+            return httpx.Response(200, json={"required_attributes": [{"id": "GTIN"}]})
+        if request.url.path == "/products/search":
+            return httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {
+                            "catalog_product_id": "MCO45056356",
+                            "name": "Parlante LG XBOOM Go XBOOM",
+                            "attributes": [],
+                        }
+                    ]
+                },
+            )
+        raise AssertionError(f"unexpected request: {request.url}")
+
+    with _client(handler) as ml_public_client:
+        result = generate_draft(
+            db_session,
+            opportunity,
+            live,
+            ml_public_client=ml_public_client,
+            access_token="tok123",
+        )
+
+    assert isinstance(result, DraftGenerationError)
+
+
 def test_generate_draft_is_idempotent_per_opportunity(db_session: Session) -> None:
     opportunity = _make_opportunity(db_session)
     live = _live()
