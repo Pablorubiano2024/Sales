@@ -144,16 +144,34 @@ def generate_draft(
     category_id = category_lookup.predict_category(real_name, client=ml_public_client)
     if category_id is None:
         return DraftGenerationError("No se pudo predecir una categoría real para este producto")
-    if not category_lookup.is_safe_to_autopublish(category_id, client=ml_public_client):
+
+    # Computed before the safety gate below (not after, as before) — a
+    # required attribute this product's own real specifications actually
+    # matched should count as covered, not just BRAND/MODEL. See
+    # category_lookup.is_safe_to_autopublish's 2026-10-03 docstring note.
+    extra_attributes = category_lookup.match_specifications(
+        category_id, live.specifications, client=ml_public_client
+    )
+    covered_attribute_ids = {a["id"] for a in extra_attributes}
+
+    # GTIN/EMPTY_GTIN_REASON is conditional_required on nearly every real
+    # category and no retail source ever gives us a real GTIN — supplying
+    # the real "no registered code" exemption instead covers both ids
+    # (see category_lookup.gtin_exemption_attribute's docstring).
+    gtin_exemption = category_lookup.gtin_exemption_attribute(category_id, client=ml_public_client)
+    if gtin_exemption is not None:
+        extra_attributes = [*extra_attributes, gtin_exemption]
+        covered_attribute_ids |= {"GTIN", "EMPTY_GTIN_REASON"}
+
+    if not category_lookup.is_safe_to_autopublish(
+        category_id, client=ml_public_client, extra_covered_ids=frozenset(covered_attribute_ids)
+    ):
         return DraftGenerationError(
             f"Categoría {category_id} requiere atributos que no podemos completar automáticamente"
         )
 
     brand = live.brand or product.brand or "Genérica"
     model = extract_model(live.specifications) or "Genérico"
-    extra_attributes = category_lookup.match_specifications(
-        category_id, live.specifications, client=ml_public_client
-    )
 
     specs = live.specifications[:MAX_DESCRIPTION_SPECS]
     bullets = [f"{name}: {value}" for name, value in specs[:6]]

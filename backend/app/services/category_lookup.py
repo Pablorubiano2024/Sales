@@ -33,6 +33,36 @@ real source for) even though `is_safe_to_autopublish` had said yes.
 `required_attribute_ids` now also treats `conditional_required` as
 blocking — conservative on purpose: we don't know the exact condition
 that triggers it per category, so this never risks guessing a GTIN.
+
+Real gap found 2026-10-03: with `is_safe_to_autopublish` only ever
+allowing BRAND/MODEL, a live dry run against production skipped 73 of 74
+real "approved" opportunities — almost every real category (TVs,
+neveras, lavadoras, aspiradoras, cafeteras...) requires at least one
+attribute beyond brand/model, and this blocked ALL of them even when the
+source's real specifications already had a confident match for that
+exact attribute. `is_safe_to_autopublish` now takes `extra_covered_ids`
+so a caller that already ran `match_specifications` for this product can
+let a required attribute through when it was actually matched.
+
+Checking the same dry run's remaining skips against MercadoLibre's own
+public `/categories/{id}/attributes` directly (2026-10-03) showed the
+REAL universal blocker isn't category-specific attributes at all — it's
+GTIN (`conditional_required` on every one of 6 real categories checked:
+TVs, neveras, lavadoras, parlantes, microondas, freidoras), which no
+retail source ever gives us. But MercadoLibre itself offers a real,
+honest way out: `EMPTY_GTIN_REASON` (also `conditional_required` on the
+same categories) is a real `list` attribute whose value id `17055158`
+`17055159` `17055160` `17055161` each mean something — the real one for
+us is `17055160` ("El producto no tiene código registrado"), confirmed
+present with the exact same id on 5 real categories live. That's not a
+guessed/fabricated barcode, it's the true statement of our actual
+situation (we're reselling retail, we don't have the manufacturer's real
+GTIN) — `gtin_exemption_attribute` below supplies it, and
+`is_safe_to_autopublish`'s caller treats both GTIN and EMPTY_GTIN_REASON
+as covered when it's present. Not yet verified against a real
+create_listing response — see
+scripts/publish_approved_opportunities.py for the live confirmation
+test before trusting this broadly.
 """
 
 from __future__ import annotations
@@ -53,6 +83,12 @@ SAFE_ATTRIBUTE_IDS = {"BRAND", "MODEL"}
 # Attribute ids already handled by dedicated create_listing() params —
 # never re-add them via matched specifications.
 _HANDLED_ELSEWHERE = {"BRAND", "MODEL", "ITEM_CONDITION"}
+# EMPTY_GTIN_REASON's real value id for "El producto no tiene código
+# registrado" (the product has no registered code) — confirmed the exact
+# same id live across 5 real categories (see module docstring). This is
+# a true statement, not a guess: this platform resells retail products,
+# none of which come with the manufacturer's real GTIN on file.
+GTIN_EXEMPTION_VALUE_ID = "17055160"
 
 
 def predict_category(query: str, *, client: httpx.Client) -> str | None:
@@ -92,11 +128,39 @@ def required_attribute_ids(category_id: str, *, client: httpx.Client) -> list[st
     ]
 
 
-def is_safe_to_autopublish(category_id: str, *, client: httpx.Client) -> bool:
-    """True when every required attribute for this category is one
-    create_listing() already supplies (BRAND, MODEL)."""
+def is_safe_to_autopublish(
+    category_id: str,
+    *,
+    client: httpx.Client,
+    extra_covered_ids: frozenset[str] = frozenset(),
+) -> bool:
+    """True when every required attribute for this category is either one
+    create_listing() already supplies (BRAND, MODEL) or one the caller has
+    already confirmed it can fill with a real, matched value —
+    `extra_covered_ids` is meant to be the attribute ids
+    `match_specifications` actually matched for this specific product
+    (never a blanket "this category has a match_specifications entry
+    somewhere" check), plus GTIN/EMPTY_GTIN_REASON when the caller is
+    about to supply `gtin_exemption_attribute`'s real exemption value —
+    never GTIN on its own, since no source ever gives us a real one."""
     required = required_attribute_ids(category_id, client=client)
-    return set(required) <= SAFE_ATTRIBUTE_IDS
+    return set(required) <= (SAFE_ATTRIBUTE_IDS | extra_covered_ids)
+
+
+def gtin_exemption_attribute(category_id: str, *, client: httpx.Client) -> dict[str, str] | None:
+    """`{"id": "EMPTY_GTIN_REASON", "value_id": GTIN_EXEMPTION_VALUE_ID}`
+    when this category's real EMPTY_GTIN_REASON attribute actually offers
+    that exact value id (see module docstring) — None when the category
+    has no EMPTY_GTIN_REASON attribute at all, or its real value list
+    doesn't include this id, rather than send it blind."""
+    attributes = list_attributes(category_id, client=client)
+    empty_gtin_reason = next((a for a in attributes if a["id"] == "EMPTY_GTIN_REASON"), None)
+    if empty_gtin_reason is None:
+        return None
+    real_value_ids = {v["id"] for v in (empty_gtin_reason.get("values") or [])}
+    if GTIN_EXEMPTION_VALUE_ID not in real_value_ids:
+        return None
+    return {"id": "EMPTY_GTIN_REASON", "value_id": GTIN_EXEMPTION_VALUE_ID}
 
 
 def get_sale_commission_pct(

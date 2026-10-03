@@ -95,6 +95,56 @@ def test_is_safe_to_autopublish_false_when_extra_attribute_required() -> None:
         assert category_lookup.is_safe_to_autopublish("MCO412089", client=client) is False
 
 
+def test_is_safe_to_autopublish_true_when_extra_attribute_is_covered() -> None:
+    """2026-10-03 fix: a required attribute beyond BRAND/MODEL is fine
+    when the caller already confirmed match_specifications matched it for
+    this specific product — this is what let real categories (TVs,
+    neveras, lavadoras...) stop being blocked wholesale."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=[
+                {"id": "BRAND", "tags": {"required": True}},
+                {"id": "MODEL", "tags": {"required": True}},
+                {"id": "POWER_SUPPLY_TYPE", "tags": {"required": True}},
+            ],
+        )
+
+    with _client(handler) as client:
+        assert (
+            category_lookup.is_safe_to_autopublish(
+                "MCO412089",
+                client=client,
+                extra_covered_ids=frozenset({"POWER_SUPPLY_TYPE"}),
+            )
+            is True
+        )
+
+
+def test_is_safe_to_autopublish_false_when_only_some_extra_attributes_covered() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=[
+                {"id": "BRAND", "tags": {"required": True}},
+                {"id": "MODEL", "tags": {"required": True}},
+                {"id": "POWER_SUPPLY_TYPE", "tags": {"required": True}},
+                {"id": "GTIN", "tags": {"required": False, "conditional_required": True}},
+            ],
+        )
+
+    with _client(handler) as client:
+        assert (
+            category_lookup.is_safe_to_autopublish(
+                "MCO412089",
+                client=client,
+                extra_covered_ids=frozenset({"POWER_SUPPLY_TYPE"}),
+            )
+            is False
+        )
+
+
 def test_required_attribute_ids_includes_conditional_required() -> None:
     """Real bug found live 2026-10-01: GTIN's real tags for category
     MCO456045 are {"required": False, "conditional_required": True} — a
@@ -125,6 +175,64 @@ def test_required_attribute_ids_includes_conditional_required() -> None:
         required = category_lookup.required_attribute_ids("MCO456045", client=client)
         assert "GTIN" in required
         assert category_lookup.is_safe_to_autopublish("MCO456045", client=client) is False
+
+
+def test_gtin_exemption_attribute_returns_the_real_exemption_value() -> None:
+    """Real shape confirmed live 2026-10-03 against 5 real categories —
+    EMPTY_GTIN_REASON's value id 17055160 ("El producto no tiene código
+    registrado") is the same id everywhere, not category-specific."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "id": "EMPTY_GTIN_REASON",
+                    "value_type": "list",
+                    "tags": {"conditional_required": True},
+                    "values": [
+                        {"id": "17055159", "name": "El producto es un kit o un pack"},
+                        {"id": "17055160", "name": "El producto no tiene código registrado"},
+                        {"id": "17055161", "name": "Otra razón"},
+                    ],
+                }
+            ],
+        )
+
+    with _client(handler) as client:
+        assert category_lookup.gtin_exemption_attribute("MCO14903", client=client) == {
+            "id": "EMPTY_GTIN_REASON",
+            "value_id": "17055160",
+        }
+
+
+def test_gtin_exemption_attribute_none_without_a_real_empty_gtin_reason() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=[{"id": "BRAND", "tags": {"required": True}}])
+
+    with _client(handler) as client:
+        assert category_lookup.gtin_exemption_attribute("MCO456045", client=client) is None
+
+
+def test_gtin_exemption_attribute_none_when_the_real_value_id_is_absent() -> None:
+    """Never guess — if this category's real EMPTY_GTIN_REASON doesn't
+    actually offer 17055160, there's no real exemption to supply."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "id": "EMPTY_GTIN_REASON",
+                    "value_type": "list",
+                    "tags": {"conditional_required": True},
+                    "values": [{"id": "99999999", "name": "Otra razón distinta"}],
+                }
+            ],
+        )
+
+    with _client(handler) as client:
+        assert category_lookup.gtin_exemption_attribute("MCO1", client=client) is None
 
 
 _MCO118449_ATTRIBUTES = [

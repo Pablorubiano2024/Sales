@@ -4,6 +4,7 @@ pattern as tests/test_category_lookup.py."""
 
 from __future__ import annotations
 
+import json
 from decimal import Decimal
 
 import httpx
@@ -178,6 +179,100 @@ def test_generate_draft_returns_error_when_category_needs_unsafe_attributes(
         result = generate_draft(db_session, opportunity, live, ml_public_client=ml_public_client)
 
     assert isinstance(result, DraftGenerationError)
+
+
+def test_generate_draft_allows_a_required_attribute_covered_by_real_specs(
+    db_session: Session,
+) -> None:
+    """2026-10-03 fix: before this, ANY required attribute beyond BRAND/
+    MODEL blocked the whole category — even when the product's own real
+    specifications already had a confident match for it. A live dry run
+    against production showed this was blocking 73 of 74 real "approved"
+    opportunities (TVs, neveras, lavadoras...). CAPACITY here is required
+    (unlike _handler_safe_category's version, where it's optional) and
+    must still succeed because `live`'s real "Capacidad" spec matches it."""
+    opportunity = _make_opportunity(db_session)
+    live = _live()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/sites/MCO/domain_discovery/search":
+            return httpx.Response(
+                200, json=[{"category_id": "MCO456045", "category_name": "Freidoras"}]
+            )
+        if request.url.path == "/categories/MCO456045/attributes":
+            return httpx.Response(
+                200,
+                json=[
+                    {"id": "BRAND", "tags": {"required": True}},
+                    {"id": "MODEL", "tags": {"required": True}},
+                    {
+                        "id": "CAPACITY",
+                        "name": "Capacidad",
+                        "value_type": "string",
+                        "tags": {"required": True},
+                    },
+                ],
+            )
+        raise AssertionError(f"unexpected request: {request.url}")
+
+    with _client(handler) as ml_public_client:
+        result = generate_draft(db_session, opportunity, live, ml_public_client=ml_public_client)
+
+    assert isinstance(result, ListingDraft)
+
+
+def test_generate_draft_covers_gtin_via_the_real_empty_gtin_reason_exemption(
+    db_session: Session,
+) -> None:
+    """2026-10-03 fix: GTIN is conditional_required on nearly every real
+    category and no retail source ever gives us a real one — confirmed
+    live this was blocking ALL 73 real "approved" opportunities even
+    after the match_specifications gate fix above. Supplying the real
+    EMPTY_GTIN_REASON exemption (not a guessed barcode) must let this
+    category through and the exemption attribute must end up on the
+    draft, ready for the real publish to send."""
+    opportunity = _make_opportunity(db_session)
+    live = _live()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/sites/MCO/domain_discovery/search":
+            return httpx.Response(
+                200, json=[{"category_id": "MCO14903", "category_name": "Televisores"}]
+            )
+        if request.url.path == "/categories/MCO14903/attributes":
+            return httpx.Response(
+                200,
+                json=[
+                    {"id": "BRAND", "tags": {"required": True}},
+                    {"id": "MODEL", "tags": {"required": True}},
+                    {
+                        "id": "GTIN",
+                        "name": "Código universal de producto",
+                        "value_type": "string",
+                        # Real shape (confirmed live 2026-10-03) — "multivalued"
+                        # is what keeps match_specifications from ever treating
+                        # this as a normal matchable attribute.
+                        "tags": {"multivalued": True, "conditional_required": True},
+                    },
+                    {
+                        "id": "EMPTY_GTIN_REASON",
+                        "value_type": "list",
+                        "tags": {"conditional_required": True},
+                        "values": [
+                            {"id": "17055160", "name": "El producto no tiene código registrado"},
+                            {"id": "17055161", "name": "Otra razón"},
+                        ],
+                    },
+                ],
+            )
+        raise AssertionError(f"unexpected request: {request.url}")
+
+    with _client(handler) as ml_public_client:
+        result = generate_draft(db_session, opportunity, live, ml_public_client=ml_public_client)
+
+    assert isinstance(result, ListingDraft)
+    extra = json.loads(result.attributes or "{}")["extra"]
+    assert {"id": "EMPTY_GTIN_REASON", "value_id": "17055160"} in extra
 
 
 def test_generate_draft_is_idempotent_per_opportunity(db_session: Session) -> None:
