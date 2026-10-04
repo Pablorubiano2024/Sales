@@ -44,6 +44,19 @@ Checked before writing this (2026-10-04):
     `429` body `"local_rate_limited"`, no Retry-After header seen) —
     `_get_with_retry` below backs off and retries a few times rather
     than treat a single 429 as fatal.
+  - `reference_price` is deliberately NEVER set from `compare_at_price`
+    here, unlike Falabella/Imusa — a real discover_tecnologiamayorista.py
+    run against production (2026-10-04) rejected 100% of real
+    opportunities once this exception surfaced: `compare_at_price` on a
+    WHOLESALE storefront is the wholesaler's own thin marketing anchor
+    (confirmed live: ratios to the real price ranged from +17.6% to
+    +127% across real products, no consistent relationship to what
+    MercadoLibre actually pays), not a genuine achievable resale value
+    the way a big retailer's crossed-out "normal price" is. Using it as
+    the assumed sell price left no real margin after MercadoLibre's own
+    fees. Leaving `reference_price=None` lets discovery fall back to
+    its standard markup-multiplier estimate instead — the same real
+    choice already made for CJdropshipping, another wholesale source.
 """
 
 from __future__ import annotations
@@ -174,9 +187,6 @@ class TecnologiaMayoristaSourceAdapter(SourceAdapter):
             )
             return None
 
-        compare_at = _to_decimal(item.get("compare_at_price_max") or item.get("compare_at_price"))
-        reference_price = compare_at if compare_at is not None and compare_at > price else None
-
         image = item.get("featured_image") or item.get("image") or {}
         image_url = image.get("url") if isinstance(image, dict) else None
 
@@ -188,7 +198,7 @@ class TecnologiaMayoristaSourceAdapter(SourceAdapter):
             stock_available=bool(item.get("available", False)),
             url=f"{self._client.base_url}/products/{item['handle']}",
             raw=None,
-            reference_price=reference_price,
+            reference_price=None,
             image_urls=(image_url,) if image_url else (),
             brand=None,
             specifications=_extract_specifications(item.get("body") or ""),

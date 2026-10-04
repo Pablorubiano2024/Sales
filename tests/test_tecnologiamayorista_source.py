@@ -78,7 +78,10 @@ def test_search_products_parses_real_response_shape() -> None:
     assert cheap.price == Decimal("325000.00")
     assert cheap.currency == "COP"
     assert cheap.stock_available is True
-    assert cheap.reference_price == Decimal("459900.00")
+    # Never set from compare_at_price on this source — see module
+    # docstring: a real production run rejected 100% of opportunities
+    # when this was naively trusted as the achievable resale value.
+    assert cheap.reference_price is None
     assert cheap.brand is None
     assert cheap.specifications == (
         ("Tipo", "Freidora de aire digital"),
@@ -98,16 +101,6 @@ def test_search_products_filters_implausible_matches() -> None:
     with _adapter(handler) as adapter:
         results = adapter.search_products("freidora de aire")
     assert results == []
-
-
-def test_search_products_reference_price_none_without_a_real_discount() -> None:
-    no_discount = {**XIAOMI_B2B, "compare_at_price_max": "325000.00"}
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        return _suggest_response([no_discount])
-
-    with _adapter(handler) as adapter:
-        assert adapter.search_products("freidora de aire")[0].reference_price is None
 
 
 def test_search_products_returns_empty_list_on_http_error() -> None:
