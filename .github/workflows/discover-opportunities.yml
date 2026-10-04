@@ -83,3 +83,9 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: poetry run python scripts/discover_ktronix.py
+
+      - name: Discover Tecnologia Mayorista
+        continue-on-error: true
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: poetry run python scripts/discover_tecnologiamayorista.py

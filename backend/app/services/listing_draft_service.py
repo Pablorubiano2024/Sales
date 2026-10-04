@@ -43,6 +43,9 @@ from backend.app.integrations.falabella_source import (
     HomecenterSourceAdapter,
 )
 from backend.app.integrations.imusa_source import ImusaSourceAdapter, JumboSourceAdapter
+from backend.app.integrations.tecnologiamayorista_source import (
+    TecnologiaMayoristaSourceAdapter,
+)
 from backend.app.models.listing_draft import ListingDraft, ListingDraftStatus
 from backend.app.models.opportunity import Opportunity
 from backend.app.models.source import Source, SourceProduct
@@ -67,6 +70,7 @@ SUPPORTED_SOURCES: dict[str, type[SourceAdapter]] = {
     "Jumbo Colombia": JumboSourceAdapter,
     "Alkosto Colombia": AlkostoSourceAdapter,
     "Ktronix Colombia": KtronixSourceAdapter,
+    "Tecnologia Mayorista": TecnologiaMayoristaSourceAdapter,
 }
 
 
