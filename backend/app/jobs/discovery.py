@@ -13,6 +13,7 @@ per the MVP scope.
 
 from __future__ import annotations
 
+import hashlib
 from decimal import Decimal
 
 from sqlalchemy.orm import Session
@@ -28,6 +29,27 @@ from backend.app.services.currency import convert_to_cop
 from backend.app.services.product_matcher import find_best_match
 
 logger = get_logger(__name__)
+
+# Product.sku is String(64). Every adapter before tecnologiamayorista_source
+# used a short numeric external_id, so this never mattered — that source's
+# real external_id is a full Shopify handle (routinely 80-100+ chars,
+# confirmed live 2026-10-04: a real create attempt hit a genuine
+# StringDataRightTruncation). Naively slicing the first 64 chars would
+# silently collide real distinct products that share a long common
+# prefix — which happens for exactly this source's real "<handle>" vs
+# "<handle>-b2b" sibling listings. A short hash of the real external_id
+# is used instead whenever the natural sku would overflow, so two
+# different real external_ids never produce the same sku.
+_MAX_SKU_LENGTH = 64
+
+
+def _build_sku(source_name: str, external_id: str) -> str:
+    prefix = source_name[:3].upper()
+    sku = f"{prefix}-{external_id}"
+    if len(sku) <= _MAX_SKU_LENGTH:
+        return sku
+    digest = hashlib.sha1(external_id.encode()).hexdigest()[:16]
+    return f"{prefix}-{digest}"
 
 
 def build_opportunity_inputs(
@@ -135,7 +157,7 @@ def run_discovery(
                 product = match.product
             else:
                 product = Product(
-                    sku=f"{source.name[:3].upper()}-{candidate.external_id}",
+                    sku=_build_sku(source.name, candidate.external_id),
                     name=candidate.name,
                     category=None,
                     active=True,

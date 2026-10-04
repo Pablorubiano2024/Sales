@@ -232,3 +232,31 @@ def test_candidate_with_reference_price_uses_it_instead_of_the_multiplier(
     assert opportunity.buy_price == Decimal("300000.00")
     # 500,000 (the real reference_price), not 300,000 * 1.8 = 540,000.
     assert opportunity.sell_price == Decimal("500000.00")
+
+
+def test_build_sku_keeps_the_natural_id_when_short_enough() -> None:
+    assert discovery_module._build_sku("Falabella Colombia", "123456") == "FAL-123456"
+
+
+def test_build_sku_hashes_when_the_natural_id_would_overflow_64_chars() -> None:
+    """Real case (2026-10-04): tecnologiamayorista_source's external_id
+    is a full Shopify handle, routinely 80-100+ chars — Product.sku is
+    String(64), and a real discovery run hit a genuine
+    StringDataRightTruncation before this fix."""
+    long_handle = "freidora-de-aire-xiaomi-air-fryer-6-5l-" + "x" * 60
+    sku = discovery_module._build_sku("Tecnologia Mayorista", long_handle)
+    assert len(sku) <= 64
+    assert sku.startswith("TEC-")
+
+
+def test_build_sku_never_collides_for_two_ids_sharing_a_long_prefix() -> None:
+    """The real motivating case: a product's real handle and its real
+    "-b2b" sibling only differ by a trailing suffix — naively slicing to
+    64 chars would make both skus identical."""
+    base = (
+        "freidora-de-aire-xiaomi-air-fryer-6-5l-con-control-desde-app-"
+        "y-7-modos-preestablecidos-bhr084cus"
+    )
+    sku_a = discovery_module._build_sku("Tecnologia Mayorista", base)
+    sku_b = discovery_module._build_sku("Tecnologia Mayorista", base + "-b2b")
+    assert sku_a != sku_b
