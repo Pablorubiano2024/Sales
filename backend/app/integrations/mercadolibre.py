@@ -319,6 +319,113 @@ class MercadoLibreAdapter(MarketplaceAdapter):
         )
         self.update_listing(external_id, price=price_value)
 
+    def _auth_headers(self) -> dict[str, str]:
+        if not self._authenticated or self._access_token is None:
+            raise RuntimeError("Call authenticate() first.")
+        return {"Authorization": f"Bearer {self._access_token}"}
+
+    def change_listing_type(self, external_id: str, listing_type_id: str) -> None:
+        """POST /items/{item_id}/listing_type. Verified live 2026-10-09
+        upgrading 5 real "free" items to "gold_special" (HTTP 200)."""
+        response = self._client.post(
+            f"/items/{external_id}/listing_type",
+            headers=self._auth_headers(),
+            json={"id": listing_type_id},
+        )
+        if response.status_code not in (200, 201):
+            raise RuntimeError(
+                f"MercadoLibre change_listing_type failed ({response.status_code}): {response.text}"
+            )
+
+    def set_free_shipping(self, external_id: str) -> None:
+        """PUT /items/{item_id} {"shipping": {"free_shipping": true}} —
+        verified live 2026-10-09 on the same 5 items (HTTP 200)."""
+        self.update_listing(external_id, shipping={"free_shipping": True})
+
+    def opt_in_catalog(self, external_id: str, catalog_product_id: str) -> dict[str, Any]:
+        """POST /items/catalog_listings. Verified live 2026-10-09: returns
+        HTTP 201 with a NEW item id (catalog_listing=true) whose
+        item_relations point back at the original, sharing its stock —
+        the caller must record that new id so order_sync can map orders
+        placed through it."""
+        response = self._client.post(
+            "/items/catalog_listings",
+            headers=self._auth_headers(),
+            json={"item_id": external_id, "catalog_product_id": catalog_product_id},
+        )
+        if response.status_code not in (200, 201):
+            raise RuntimeError(
+                f"MercadoLibre opt_in_catalog failed ({response.status_code}): {response.text}"
+            )
+        data: dict[str, Any] = response.json()
+        return data
+
+    def get_free_shipping_cost(
+        self, item: dict[str, Any], price: Decimal, listing_type_id: str
+    ) -> Decimal | None:
+        """Real seller-paid cost of offering free shipping on this item at
+        this price/listing type, via GET /users/{id}/shipping_options/free
+        (all_country.list_cost). Verified live 2026-10-09: 8,000-25,200 COP
+        across 5 real items. None when MercadoLibre doesn't return one."""
+        params: dict[str, Any] = {
+            "item_price": str(price),
+            "listing_type_id": listing_type_id,
+            "mode": "me2",
+            "condition": item.get("condition", "new"),
+            "logistic_type": (item.get("shipping") or {}).get("logistic_type") or "xd_drop_off",
+        }
+        dimensions = (item.get("shipping") or {}).get("dimensions")
+        if dimensions:
+            params["dimensions"] = dimensions
+        else:
+            params["item_id"] = item["id"]
+        response = self._client.get(
+            f"/users/{self._user_id}/shipping_options/free",
+            headers=self._auth_headers(),
+            params=params,
+        )
+        if response.status_code != 200:
+            logger.warning("shipping_options/free failed for %s: %s", item.get("id"), response.text)
+            return None
+        cost = ((response.json().get("coverage") or {}).get("all_country") or {}).get("list_cost")
+        return None if cost is None else Decimal(str(cost))
+
+    def get_me(self) -> dict[str, Any] | None:
+        """GET /users/me — the account itself, incl. seller_reputation."""
+        response = self._client.get("/users/me", headers=self._auth_headers())
+        if response.status_code != 200:
+            return None
+        data: dict[str, Any] = response.json()
+        return data
+
+    def get_catalog_product(self, catalog_product_id: str) -> dict[str, Any] | None:
+        """GET /products/{id} — the catalog product's own name/attributes."""
+        response = self._client.get(f"/products/{catalog_product_id}", headers=self._auth_headers())
+        if response.status_code != 200:
+            return None
+        data: dict[str, Any] = response.json()
+        return data
+
+    def get_catalog_competitor_prices(self, catalog_product_id: str) -> list[Decimal] | None:
+        """Prices of OTHER sellers' active items in this catalog product
+        (GET /products/{id}/items), ours excluded. [] when the catalog has
+        no active sellers (404 is how MercadoLibre reports that, verified
+        2026-10-09); None on any other failure — unknown, not "no
+        competition"."""
+        response = self._client.get(
+            f"/products/{catalog_product_id}/items", headers=self._auth_headers()
+        )
+        if response.status_code == 404:
+            return []
+        if response.status_code != 200:
+            logger.warning("products/%s/items failed: %s", catalog_product_id, response.text)
+            return None
+        return sorted(
+            Decimal(str(r["price"]))
+            for r in response.json().get("results", [])
+            if str(r.get("seller_id")) != str(self._user_id)
+        )
+
     def update_stock(self, external_id: str, in_stock: bool) -> None:
         # TODO: PUT /items/{item_id} with {"available_quantity": ...}
         raise NotImplementedError(

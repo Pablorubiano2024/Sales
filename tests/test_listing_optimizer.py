@@ -1,0 +1,127 @@
+"""Tests for listing_optimizer.py's pure decision logic — the ROI floor,
+competitor-based pricing and the same-product guard. Examples come from
+real listings checked live 2026-10-09."""
+
+from __future__ import annotations
+
+from decimal import Decimal
+
+from backend.app.services.listing_optimizer import (
+    catalog_matches,
+    decide_price,
+    minimum_profitable_price,
+    round_price_down,
+    round_price_up,
+)
+
+D = Decimal
+
+
+def _item(title: str, brand: str, model: str) -> dict:
+    return {
+        "title": title,
+        "attributes": [{"id": "BRAND", "value_name": brand}, {"id": "MODEL", "value_name": model}],
+    }
+
+
+def _catalog(name: str, brand: str, model: str) -> dict:
+    return {
+        "name": name,
+        "attributes": [{"id": "BRAND", "value_name": brand}, {"id": "MODEL", "value_name": model}],
+    }
+
+
+def test_rounding_to_900_prices() -> None:
+    assert round_price_up(D("223101")) == D("223900")
+    assert round_price_up(D("223900")) == D("223900")
+    assert round_price_down(D("782001")) == D("781900")
+    assert round_price_down(D("781900")) == D("781900")
+
+
+def test_floor_clears_roi_with_price_dependent_fee_and_shipping() -> None:
+    buy = D("144900")
+    floor = minimum_profitable_price(
+        buy, D("0"), lambda p: p * D("0.12"), lambda p: D("8000"), D("0.30"), D("20000")
+    )
+    net = floor - buy - floor * D("0.12") - D("8000")
+    assert net >= buy * D("0.30")
+    # and it's the lowest such "...900" price
+    lower = floor - 1000
+    assert lower - buy - lower * D("0.12") - D("8000") < buy * D("0.30")
+
+
+def test_floor_respects_min_net_profit_on_cheap_items() -> None:
+    floor = minimum_profitable_price(
+        D("20000"), D("0"), lambda p: D("0"), lambda p: D("0"), D("0.30"), D("20000")
+    )
+    assert floor - D("20000") >= D("20000")
+
+
+def test_undercuts_cheapest_competitor_even_if_that_raises_price() -> None:
+    decision = decide_price(D("400000"), D("659900"), [D("789900")])
+    assert decision.action == "price"
+    assert decision.price == D("781900")
+
+
+def test_pauses_when_floor_cannot_beat_competitor() -> None:
+    decision = decide_price(D("223900"), D("249900"), [D("138800"), D("150000")])
+    assert decision.action == "pause"
+
+
+def test_no_competitor_data_keeps_current_price() -> None:
+    assert decide_price(D("400000"), D("699900"), None).price == D("699900")
+    assert decide_price(D("400000"), D("699900"), []).price == D("699900")
+
+
+def test_no_competitor_data_raises_to_floor_when_unprofitable() -> None:
+    decision = decide_price(D("459900"), D("399900"), None)
+    assert decision.price == D("459900")
+
+
+def test_same_model_matches() -> None:
+    assert catalog_matches(
+        _item("Freidora Ventana 6 Lt", "Huken", "HU-AF-6WT"),
+        _catalog("Freidora De Aire Easy-view 6 L", "Huken", "HU-AF-6WT"),
+    )
+
+
+def test_manufacturer_code_vs_commercial_model_still_matches() -> None:
+    assert catalog_matches(
+        _item("Reloj Galaxy Watch 8 40mm Silver", "Samsung", "SM L320NZSALTA"),
+        _catalog("Samsung Galaxy Watch8 40mm Silver", "Samsung", "Watch 8 40mm"),
+    )
+
+
+def test_lite_variant_is_a_different_product() -> None:
+    assert not catalog_matches(
+        _item("Xiaomi Redmi Watch 6 Lite Amoled 1.96 Gps", "Xiaomi", "M2565W1"),
+        _catalog('Smartband Redmi Watch 6 display de 2.07"', "Redmi", "watch 6"),
+    )
+
+
+def test_different_brand_never_matches() -> None:
+    assert not catalog_matches(
+        _item("Licuadora 1700 W", "Ninja", "BL770"),
+        _catalog("Repuesto cuchilla licuadora 1700 W", "Generica", "X1"),
+    )
+
+
+def test_launch_mode_prices_at_floor_even_with_cheaper_room_above() -> None:
+    # Ventana, 2026-10-13: 16% under the only competitor still lost the
+    # Buy Box (reputation_below_threshold) -> launch prices at the floor.
+    decision = decide_price(D("481900"), D("659900"), [D("789900")], launch_mode=True)
+    assert decision.action == "price"
+    assert decision.price == D("481900")
+
+
+def test_launch_mode_prices_at_floor_without_competitors() -> None:
+    assert decide_price(D("622900"), D("779900"), None, launch_mode=True).price == D("622900")
+
+
+def test_launch_mode_still_pauses_when_competitor_below_floor() -> None:
+    decision = decide_price(D("1574900"), D("2199900"), [D("999999")], launch_mode=True)
+    assert decision.action == "pause"
+
+
+def test_launch_mode_never_goes_below_floor_when_current_is_lower() -> None:
+    assert decide_price(D("459900"), D("399900"), None, launch_mode=True).price == D("459900")

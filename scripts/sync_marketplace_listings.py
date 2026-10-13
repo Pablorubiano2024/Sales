@@ -9,8 +9,9 @@ For each MarketplaceProduct currently ACTIVE on MercadoLibre:
      buy/sell/fee math discovery uses (build_opportunity_inputs), which
      also reclassifies it (approved/promising/rejected/review).
   4. If it fell below "promising" -> pause the listing.
-  5. Else if the real sell price moved -> push the new price to
-     MercadoLibre (update_listing_price).
+  5. Price is NOT set here — scripts/optimize_listings.py runs right
+     after this in the same workflow and owns pricing (see
+     backend/app/services/listing_optimizer.py).
 
 Intentionally does NOT reactivate a paused listing — pausing here is a
 one-way signal ("something needs a human look"); re-publishing is a
@@ -75,7 +76,7 @@ def main() -> None:
     init_db()
     settings = get_settings()
     db = SessionLocal()
-    paused = updated = unchanged = skipped = 0
+    paused = unchanged = skipped = 0
     try:
         # Includes PAUSED, not just ACTIVE: a freshly created item's status
         # can be a transient value (e.g. "paused" pending MercadoLibre's
@@ -179,19 +180,14 @@ def main() -> None:
                     paused += 1
                     continue
 
-                new_price = opportunity.sell_price
-                if new_price != listing.selling_price:
-                    old_price = listing.selling_price
-                    listing_service.update_listing_price(db, ml_adapter, listing, new_price)
-                    print(f"PRECIO   {label}: {old_price} -> {new_price} COP")
-                    updated += 1
-                else:
-                    unchanged += 1
+                # Price is owned by scripts/optimize_listings.py (runs right
+                # after this in the same workflow) — it prices against real
+                # catalog competitors, never below the ROI floor computed
+                # from the fresh buy price just saved above. Pushing the
+                # estimated sell price here would undo that every day.
+                unchanged += 1
 
-        print(
-            f"\nPausadas: {paused}  Precio actualizado: {updated}  "
-            f"Sin cambios: {unchanged}  Omitidas: {skipped}"
-        )
+        print(f"\nPausadas: {paused}  Sin cambios: {unchanged}  Omitidas: {skipped}")
     finally:
         db.close()
 
