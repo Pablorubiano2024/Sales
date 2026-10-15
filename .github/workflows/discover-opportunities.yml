@@ -3,9 +3,8 @@ name: Discover opportunities
 # Runs every real retail-arbitrage discovery script daily, before publish
 # (publish-marketplace-listings.yml) and sync (sync-marketplace-
 # listings.yml) — keeps the "approved" pool that daily publishing draws
-# from from running dry. Each source runs as its own step with
-# `continue-on-error: true` so one source having a bad day (a site
-# hiccup, a schema change) doesn't block the others.
+# from from running dry. Sources run in parallel groups (see `jobs`), and
+# one source failing never stops the others.
 #
 # CJdropshipping is deliberately NOT included here: its opportunities use
 # an estimated (not verified) sell price, so they're excluded from the
@@ -33,8 +32,28 @@ on:
   workflow_dispatch: {}
 
 jobs:
+  # Run sequentially in one job, all 7 sources took ~5-6h and hit GitHub's
+  # 6h job limit every other day (2026-10-11/13/15: cancelled mid-Ktronix,
+  # Tecnologia Mayorista never ran). Now one job per group, in parallel.
+  # Sources that sell the SAME items stay sequential inside one group, so
+  # two jobs never race to create the same Product: Alkosto/Ktronix share
+  # one catalog, Falabella/Homecenter one company, Jumbo resells Imusa.
   discover:
     runs-on: ubuntu-latest
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false
+      matrix:
+        group:
+          - name: falabella-homecenter
+            scripts: discover_falabella.py discover_homecenter.py
+          - name: alkosto-ktronix
+            scripts: discover_alkosto.py discover_ktronix.py
+          - name: imusa-jumbo
+            scripts: discover_imusa.py discover_jumbo.py
+          - name: tecnologiamayorista
+            scripts: discover_tecnologiamayorista.py
+    name: discover (${{ matrix.group.name }})
     steps:
       - uses: actions/checkout@v4
 
@@ -48,44 +67,16 @@ jobs:
       - name: Install dependencies
         run: poetry install --no-root --only main
 
-      - name: Discover Falabella
-        continue-on-error: true
+      # One source having a bad day (a site hiccup, a schema change)
+      # doesn't stop the next one in its group.
+      - name: Discover ${{ matrix.group.name }}
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: poetry run python scripts/discover_falabella.py
-
-      - name: Discover Homecenter
-        continue-on-error: true
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: poetry run python scripts/discover_homecenter.py
-
-      - name: Discover Imusa
-        continue-on-error: true
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: poetry run python scripts/discover_imusa.py
-
-      - name: Discover Jumbo
-        continue-on-error: true
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: poetry run python scripts/discover_jumbo.py
-
-      - name: Discover Alkosto
-        continue-on-error: true
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: poetry run python scripts/discover_alkosto.py
-
-      - name: Discover Ktronix
-        continue-on-error: true
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: poetry run python scripts/discover_ktronix.py
-
-      - name: Discover Tecnologia Mayorista
-        continue-on-error: true
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: poetry run python scripts/discover_tecnologiamayorista.py
+        run: |
+          status=0
+          for script in ${{ matrix.group.scripts }}; do
+            echo "::group::$script"
+            poetry run python "scripts/$script" || { echo "::warning::$script failed"; status=1; }
+            echo "::endgroup::"
+          done
+          exit $status
