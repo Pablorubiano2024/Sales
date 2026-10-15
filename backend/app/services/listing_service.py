@@ -107,6 +107,17 @@ def pause_listing(
     logger.info("Paused ML item=%s (product=%s): %s", record.external_id, record.product_id, reason)
 
 
+def activate_listing(db: Session, adapter: MercadoLibreAdapter, record: MarketplaceProduct) -> None:
+    """Undo pause_listing. Callers own the decision (listing_optimizer's
+    ROI-gated reactivation)."""
+    if record.external_id is None:
+        return
+    adapter.update_listing(record.external_id, status="active")
+    record.status = ListingStatus.ACTIVE
+    db.commit()
+    logger.info("Reactivated ML item=%s (product=%s)", record.external_id, record.product_id)
+
+
 def update_listing_price(
     db: Session, adapter: MercadoLibreAdapter, record: MarketplaceProduct, new_price: Decimal
 ) -> None:

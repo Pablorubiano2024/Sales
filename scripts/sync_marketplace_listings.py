@@ -2,21 +2,26 @@
 real source.
 
 For each MarketplaceProduct currently ACTIVE on MercadoLibre:
-  1. Re-fetch the product live from its source (Falabella today).
-  2. If it's gone / out of stock -> pause the listing (reversible — see
-     the user's confirmed choice over permanently closing it).
-  3. Otherwise recompute the opportunity from the live price via the same
+  1. Re-fetch the product live from its ORIGIN source — the one its SKU
+     was built from (listing_optimizer.origin_source). Not the other
+     sources discovery attached to the same product: checked 2026-10-15,
+     those are often a different item. Before that date this picked an
+     arbitrary one of them, while the optimizer priced from another.
+  2. Recompute its opportunity from the live price via the same
      buy/sell/fee math discovery uses (build_opportunity_inputs), which
      also reclassifies it (approved/promising/rejected/review).
-  4. If it fell below "promising" -> pause the listing.
-  5. Price is NOT set here — scripts/optimize_listings.py runs right
+  3. If it's gone, out of stock or fell below "promising" -> pause the
+     listing (reversible).
+  4. Price is NOT set here — scripts/optimize_listings.py runs right
      after this in the same workflow and owns pricing (see
      backend/app/services/listing_optimizer.py).
 
-Intentionally does NOT reactivate a paused listing — pausing here is a
-one-way signal ("something needs a human look"); re-publishing is a
-deliberate act (scripts/publish_approved_opportunities.py), not something
-this job should undo on its own.
+PAUSED listings get steps 1 and 2 too (fresh buy price, stock and
+classification) so the optimizer, which runs next, can reactivate the
+ones that are profitable again under its ROI gate. Before 2026-10-15
+pausing was one-way; that left a one-off source fetch failure (Quick
+3.5L, the 2nd most-visited listing) and listings whose buy price later
+dropped (Digital 8L: 359,900 -> 199,900) off for good.
 
 Meant to run once a day via a scheduler (see .github/workflows/ for the
 GitHub Actions cron wiring this into).
@@ -36,6 +41,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from backend.app.core.config import get_settings  # noqa: E402
 from backend.app.core.database import SessionLocal, init_db  # noqa: E402
 from backend.app.core.logging import get_logger  # noqa: E402
+from backend.app.core.time import utcnow  # noqa: E402
 from backend.app.integrations.base import SourceAdapter  # noqa: E402
 from backend.app.integrations.falabella_source import (  # noqa: E402
     FalabellaSourceAdapter,
@@ -48,10 +54,11 @@ from backend.app.integrations.imusa_source import (  # noqa: E402
 from backend.app.integrations.mercadolibre import MercadoLibreAdapter  # noqa: E402
 from backend.app.jobs.discovery import build_opportunity_inputs  # noqa: E402
 from backend.app.models.marketplace import ListingStatus, MarketplaceProduct  # noqa: E402
-from backend.app.models.opportunity import Opportunity, OpportunityStatus  # noqa: E402
-from backend.app.models.source import Source, SourceProduct  # noqa: E402
+from backend.app.models.opportunity import OpportunityStatus  # noqa: E402
+from backend.app.models.source import Source  # noqa: E402
 from backend.app.services import listing_service  # noqa: E402
 from backend.app.services.arbitrage_engine import evaluate_opportunity  # noqa: E402
+from backend.app.services.listing_optimizer import origin_source  # noqa: E402
 
 logger = get_logger(__name__)
 
@@ -100,91 +107,74 @@ def main() -> None:
             listings = []
             for candidate in candidates:
                 listing_service.refresh_listing_status(db, ml_adapter, candidate)
-                if candidate.status == ListingStatus.ACTIVE:
+                if candidate.status in (ListingStatus.ACTIVE, ListingStatus.PAUSED):
                     listings.append(candidate)
-            print(f"{len(listings)} confirmadas activas tras refrescar su estado real.")
+            active_count = sum(1 for x in listings if x.status == ListingStatus.ACTIVE)
+            print(
+                f"{active_count} confirmadas activas y {len(listings) - active_count} "
+                "pausadas tras refrescar su estado real."
+            )
 
             for listing in listings:
+                is_active = listing.status == ListingStatus.ACTIVE
                 product = listing.product
                 label = f"[{product.sku}] {product.name[:60]}"
 
-                opportunity = (
-                    db.query(Opportunity)
-                    .filter_by(product_id=product.id, marketplace_id=listing.marketplace_id)
-                    .first()
-                )
-                if opportunity is None:
-                    print(f"SKIP  {label}: sin Opportunity asociada")
-                    skipped += 1
-                    continue
-
-                source = db.get(Source, opportunity.source_id)
+                opportunity, source_product = origin_source(db, listing)
+                source = db.get(Source, opportunity.source_id) if opportunity else None
                 adapter_cls = SUPPORTED_SOURCES.get(source.name if source else "")
-                if adapter_cls is None:
-                    print(f"SKIP  {label}: fuente '{source.name if source else '?'}' no soportada")
+                if opportunity is None or source_product is None or adapter_cls is None:
+                    print(f"SKIP  {label}: fuente de origen no soportada / sin Opportunity")
                     skipped += 1
                     continue
-
-                source_product = (
-                    db.query(SourceProduct)
-                    .filter_by(source_id=opportunity.source_id, product_id=product.id)
-                    .first()
-                )
-                if source_product is None or not source_product.external_id:
-                    print(f"SKIP  {label}: sin SourceProduct.external_id")
-                    skipped += 1
-                    continue
+                assert source_product.external_id is not None
 
                 with adapter_cls() as source_adapter:
                     live = source_adapter.get_product(source_product.external_id)
 
-                if live is None or not live.stock_available:
-                    listing_service.pause_listing(
-                        db, ml_adapter, listing, reason="fuente sin stock / producto no disponible"
+                reason = None
+                if live is None:
+                    # Gone, or a one-off fetch failure: unavailable as of this
+                    # check (the optimizer won't reactivate on an older read);
+                    # the next successful check restores it.
+                    source_product.stock_available = False
+                    source_product.last_checked_at = utcnow()
+                    db.commit()
+                    reason = "fuente de origen no respondió / producto no disponible"
+                else:
+                    source_product.current_price = live.price
+                    source_product.stock_available = live.stock_available
+                    source_product.last_checked_at = utcnow()
+                    db.commit()
+                    inputs = build_opportunity_inputs(
+                        live,
+                        product.id,
+                        opportunity.source_id,
+                        listing.marketplace_id,
+                        settings,
+                        shipping_cost_cop=DOMESTIC_SHIPPING_COST_COP,
+                        min_buy_price_cop=Decimal("0"),
                     )
-                    print(f"PAUSADA  {label}: ya no disponible en la fuente")
-                    paused += 1
-                    continue
+                    if not live.stock_available:
+                        reason = "fuente de origen sin stock"
+                    elif inputs is None:
+                        reason = "precio de compra por debajo del mínimo"
+                    else:
+                        opportunity = evaluate_opportunity(db, inputs)
+                        if opportunity.status not in VIABLE_STATUSES:
+                            reason = f"reclasificada como '{opportunity.status.value}'"
 
-                source_product.current_price = live.price
-                source_product.stock_available = live.stock_available
-                db.commit()
-
-                inputs = build_opportunity_inputs(
-                    live,
-                    product.id,
-                    opportunity.source_id,
-                    listing.marketplace_id,
-                    settings,
-                    shipping_cost_cop=DOMESTIC_SHIPPING_COST_COP,
-                    min_buy_price_cop=Decimal("0"),
-                )
-                if inputs is None:
-                    listing_service.pause_listing(
-                        db, ml_adapter, listing, reason="precio de compra por debajo del mínimo"
-                    )
-                    print(f"PAUSADA  {label}: precio de compra por debajo del mínimo")
-                    paused += 1
-                    continue
-
-                opportunity = evaluate_opportunity(db, inputs)
-
-                if opportunity.status not in VIABLE_STATUSES:
-                    listing_service.pause_listing(
-                        db,
-                        ml_adapter,
-                        listing,
-                        reason=f"reclasificada como '{opportunity.status.value}'",
-                    )
-                    print(f"PAUSADA  {label}: reclasificada como '{opportunity.status.value}'")
+                if reason and is_active:
+                    listing_service.pause_listing(db, ml_adapter, listing, reason=reason)
+                    print(f"PAUSADA  {label}: {reason}")
                     paused += 1
                     continue
 
                 # Price is owned by scripts/optimize_listings.py (runs right
-                # after this in the same workflow) — it prices against real
-                # catalog competitors, never below the ROI floor computed
-                # from the fresh buy price just saved above. Pushing the
-                # estimated sell price here would undo that every day.
+                # after this in the same workflow) — it prices from the
+                # cheapest fresh, in-stock source refreshed just above, never
+                # below the ROI floor. Pushing the estimated sell price here
+                # would undo that every day.
                 unchanged += 1
 
         print(f"\nPausadas: {paused}  Sin cambios: {unchanged}  Omitidas: {skipped}")

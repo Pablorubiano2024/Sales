@@ -4,12 +4,18 @@ real listings checked live 2026-10-09."""
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from decimal import Decimal
 
+from backend.app.models.opportunity import Opportunity, OpportunityStatus
+from backend.app.models.source import SourceProduct
 from backend.app.services.listing_optimizer import (
+    buy_source_blocker,
     catalog_matches,
     decide_price,
+    listing_keys,
     minimum_profitable_price,
+    reactivation_blocker,
     round_price_down,
     round_price_up,
 )
@@ -125,3 +131,38 @@ def test_launch_mode_still_pauses_when_competitor_below_floor() -> None:
 
 def test_launch_mode_never_goes_below_floor_when_current_is_lower() -> None:
     assert decide_price(D("459900"), D("399900"), None, launch_mode=True).price == D("459900")
+
+
+NOW = datetime(2026, 10, 15, 13, 0)
+PAUSED_BY_US = {"status": "paused", "sub_status": ["paused_by_seller"], "available_quantity": 1}
+
+
+def _source(in_stock: bool = True, age_h: int = 1) -> SourceProduct:
+    return SourceProduct(stock_available=in_stock, last_checked_at=NOW - timedelta(hours=age_h))
+
+
+def test_reactivation_only_undoes_our_own_pause_with_ml_stock() -> None:
+    # Quick 3.5L, 2026-10-15: paused after a one-off source fetch failure.
+    keys = listing_keys("p1", PAUSED_BY_US)
+    assert reactivation_blocker(PAUSED_BY_US, keys, set()) is None
+    assert reactivation_blocker({**PAUSED_BY_US, "sub_status": ["suspended"]}, keys, set())
+    assert reactivation_blocker({**PAUSED_BY_US, "available_quantity": 0}, keys, set())
+
+
+def test_never_reactivates_a_duplicate() -> None:
+    # Imusa Esencial 3.2L, 2026-10-15: two product rows, one catalog product.
+    item = {**PAUSED_BY_US, "catalog_product_id": "MCO19641188"}
+    live = listing_keys("other-product", {"catalog_product_id": "MCO19641188"})
+    assert reactivation_blocker(item, listing_keys("p1", item), live)
+    assert reactivation_blocker(PAUSED_BY_US, {"product:p1"}, {"product:p1"})
+
+
+def test_origin_source_must_be_fresh_in_stock_and_viable() -> None:
+    approved = Opportunity(status=OpportunityStatus.APPROVED)
+    assert buy_source_blocker(approved, _source(), NOW) is None
+    assert buy_source_blocker(None, None, NOW)
+    assert buy_source_blocker(approved, _source(in_stock=False), NOW)
+    # One-off fetch failure: not re-checked today -> leave it alone.
+    assert buy_source_blocker(approved, _source(age_h=72), NOW)
+    rejected = Opportunity(status=OpportunityStatus.REJECTED)
+    assert buy_source_blocker(rejected, _source(), NOW)

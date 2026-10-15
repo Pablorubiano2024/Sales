@@ -1,6 +1,7 @@
-"""Applies the Listing Optimizer's one general rule to every ACTIVE
-MercadoLibre listing — see backend/app/services/listing_optimizer.py for
-the rule and the hard ROI/net-profit floor it never goes below.
+"""Applies the Listing Optimizer's one general rule to every ACTIVE (and
+the reactivation check to every PAUSED) MercadoLibre listing — see
+backend/app/services/listing_optimizer.py for the rule and the hard
+ROI/net-profit floor it never goes below.
 
 Runs right AFTER scripts/sync_marketplace_listings.py (same workflow):
 sync refreshes each listing's real buy price and pauses anything no longer
@@ -38,18 +39,18 @@ def main() -> None:
     init_db()
     settings = get_settings()
     db = SessionLocal()
-    changed = unchanged = paused = skipped = failed = 0
+    changed = unchanged = paused = reactivated = skipped = failed = 0
     try:
         listings = (
             db.query(MarketplaceProduct)
             .filter(
-                MarketplaceProduct.status == ListingStatus.ACTIVE,
+                MarketplaceProduct.status.in_([ListingStatus.ACTIVE, ListingStatus.PAUSED]),
                 MarketplaceProduct.external_id.isnot(None),
             )
             .all()
         )
         print(
-            f"{len(listings)} avisos activos. Mínimos: ROI {settings.min_roi:.0%}, "
+            f"{len(listings)} avisos activos/pausados. Mínimos: ROI {settings.min_roi:.0%}, "
             f"ganancia neta {settings.min_net_profit:,.0f} COP."
         )
         if not confirm:
@@ -63,10 +64,19 @@ def main() -> None:
                 f"Ventas completadas de la cuenta: {completed_sales(ml)} -> modo "
                 f"{'LANZAMIENTO (precio mínimo rentable)' if launch_mode else 'normal'}\n"
             )
+            # Active first, so a paused twin of a live listing stays paused.
+            listings.sort(key=lambda x: x.status != ListingStatus.ACTIVE)
+            live_keys: set[str] = set()
             for listing in listings:
                 try:
                     result = optimize_listing(
-                        db, ml, listing, settings, apply=confirm, launch_mode=launch_mode
+                        db,
+                        ml,
+                        listing,
+                        settings,
+                        apply=confirm,
+                        launch_mode=launch_mode,
+                        live_keys=live_keys,
                     )
                 except Exception as exc:  # one bad listing shouldn't stop the rest
                     db.rollback()
@@ -82,12 +92,17 @@ def main() -> None:
                     unchanged += 1
                 else:
                     paused += result.paused
-                    changed += not result.paused
+                    reactivated += result.reactivated
+                    changed += not (result.paused or result.reactivated)
+                    kind = (
+                        "PAUSA" if result.paused else "ACTIVA" if result.reactivated else "CAMBIO"
+                    )
                     for action in result.actions:
-                        print(f"{'PAUSA' if result.paused else 'CAMBIO'} {label}: {action}")
+                        print(f"{kind:6} {label}: {action}")
 
         print(
-            f"\nCambiados: {changed}  Pausados: {paused}  Sin cambios: {unchanged}  "
+            f"\nCambiados: {changed}  Pausados: {paused}  Reactivados: {reactivated}  "
+            f"Sin cambios: {unchanged}  "
             f"Omitidos: {skipped}  Errores: {failed}"
         )
     finally:

@@ -41,8 +41,29 @@ consideres más óptimo", no paid Product Ads), still paused when a
 same-product competitor is cheaper than that floor, and no new catalog
 opt-ins. Switches back to normal mode on its own after those first sales.
 
-`decide_price` and `minimum_profitable_price` are pure; `optimize_listing`
-does the real I/O and only writes when `apply=True`.
+BUY SOURCE — always the listing's ORIGIN source (the one its SKU was
+built from, `origin_source`), never another source discovery attached to
+the same product: checked 2026-10-15, those cross-source matches are
+often a different item (easychef55 <- a Tezzio 4L, Holstein 9L <- a
+Haceb). It must have been re-checked by the sync within MAX_SOURCE_AGE,
+be in stock and approved/promising (`buy_source_blocker`), otherwise no
+changes.
+
+REACTIVATION — a listing WE paused (sub_status `paused_by_seller`) goes
+through the same rule and is switched back on when everything holds:
+it has a buy source as above, still has MercadoLibre stock, no other
+live listing of ours sells the same product (same product row or same
+catalog product — MercadoLibre penalizes duplicates; the Imusa Mega 7.5L
+and Esencial 3.2L each have a paused twin), and the price decision clears
+the floor (no same-product competitor below it).
+Same gate as an active listing, so a pause is no longer one-way
+(2026-10-15: Quick 3.5L, 2nd most visited, stayed off after a one-off
+source fetch failure; Digital 8L's buy price dropped 359,900 -> 199,900
+while it sat paused).
+
+`decide_price`, `minimum_profitable_price`, `buy_source_blocker` and
+`reactivation_blocker` are pure; `optimize_listing` does the real I/O
+and only writes when `apply=True`.
 """
 
 from __future__ import annotations
@@ -51,15 +72,19 @@ import re
 import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
 
 from sqlalchemy.orm import Session
 
 from backend.app.core.config import Settings
 from backend.app.core.logging import get_logger
+from backend.app.core.time import utcnow
 from backend.app.integrations.mercadolibre import MercadoLibreAdapter
+from backend.app.jobs.discovery import build_sku
 from backend.app.models.marketplace import ListingStatus, MarketplaceProduct
-from backend.app.models.opportunity import Opportunity
+from backend.app.models.opportunity import Opportunity, OpportunityStatus
+from backend.app.models.source import Source, SourceProduct
 from backend.app.services import category_lookup, listing_service
 
 logger = get_logger(__name__)
@@ -221,6 +246,47 @@ class OptimizationResult:
     actions: list[str] = field(default_factory=list)
     skipped: str | None = None
     paused: bool = False
+    reactivated: bool = False
+
+
+MAX_SOURCE_AGE = timedelta(hours=36)
+VIABLE_STATUSES = {OpportunityStatus.APPROVED, OpportunityStatus.PROMISING}
+
+
+def buy_source_blocker(
+    opportunity: Opportunity | None, source_product: SourceProduct | None, now: datetime
+) -> str | None:
+    """Why the origin source can't be priced from right now, or None."""
+    if opportunity is None or source_product is None:
+        return "sin fuente de origen"
+    if not source_product.stock_available:
+        return "fuente de origen sin stock"
+    checked = source_product.last_checked_at
+    if checked is None or now - checked > MAX_SOURCE_AGE:
+        return "fuente de origen sin revisar hoy"
+    if opportunity.status not in VIABLE_STATUSES:
+        return f"oportunidad '{opportunity.status.value}'"
+    return None
+
+
+def listing_keys(product_id: str, item: dict) -> set[str]:
+    """What makes two of our listings "the same product"."""
+    keys = {f"product:{product_id}"}
+    if item.get("catalog_product_id"):
+        keys.add(f"catalog:{item['catalog_product_id']}")
+    return keys
+
+
+def reactivation_blocker(item: dict, keys: set[str], live_keys: set[str]) -> str | None:
+    """Why a paused item must stay paused regardless of price, or None.
+    Only pauses we made are ours to undo, and never into a duplicate."""
+    if item.get("sub_status") != ["paused_by_seller"]:
+        return f"pausado por MercadoLibre ({item.get('sub_status')})"
+    if not item.get("available_quantity"):
+        return "sin stock en MercadoLibre"
+    if keys & live_keys:
+        return "ya hay otro aviso activo del mismo producto"
+    return None
 
 
 def completed_sales(ml: MercadoLibreAdapter) -> int | None:
@@ -241,13 +307,30 @@ def is_launch_mode(ml: MercadoLibreAdapter) -> bool:
     return sales is None or sales < LAUNCH_MODE_MAX_SALES
 
 
-def _latest_opportunity(db: Session, listing: MarketplaceProduct) -> Opportunity | None:
-    return (
-        db.query(Opportunity)
-        .filter_by(product_id=listing.product_id, marketplace_id=listing.marketplace_id)
-        .order_by(Opportunity.updated_at.desc())
-        .first()
-    )
+def origin_source(
+    db: Session, listing: MarketplaceProduct
+) -> tuple[Opportunity | None, SourceProduct | None]:
+    """The source this listing's product was discovered at (its SKU is
+    built from it), with its Opportunity for this marketplace."""
+    product = listing.product
+    for source_product in db.query(SourceProduct).filter_by(product_id=product.id):
+        source = db.get(Source, source_product.source_id)
+        if (
+            source is not None
+            and source_product.external_id
+            and build_sku(source.name, source_product.external_id) == product.sku
+        ):
+            opportunity = (
+                db.query(Opportunity)
+                .filter_by(
+                    product_id=product.id,
+                    source_id=source.id,
+                    marketplace_id=listing.marketplace_id,
+                )
+                .first()
+            )
+            return opportunity, source_product
+    return None, None
 
 
 def optimize_listing(
@@ -258,20 +341,36 @@ def optimize_listing(
     *,
     apply: bool,
     launch_mode: bool = False,
+    live_keys: set[str] | None = None,
 ) -> OptimizationResult:
+    """`live_keys` — listing_keys of every listing already live; process
+    ACTIVE listings first so paused twins see them. Updated in place when
+    this one is (re)activated."""
+    if live_keys is None:
+        live_keys = set()
     assert listing.external_id is not None
     info = ml.get_listing(listing.external_id)
     if info is None or info.raw is None:
         return OptimizationResult(listing.external_id, "?", skipped="no existe en MercadoLibre")
     item = info.raw
     result = OptimizationResult(listing.external_id, item.get("title", "")[:50])
-    if item.get("status") != "active":
+    if item.get("status") not in ("active", "paused"):
         result.skipped = f"estado real '{item.get('status')}'"
         return result
+    is_paused = item["status"] == "paused"
+    keys = listing_keys(listing.product_id, item)
+    if not is_paused:
+        live_keys |= keys
 
-    opportunity = _latest_opportunity(db, listing)
-    if opportunity is None:
-        result.skipped = "sin Opportunity asociada"
+    blocker = reactivation_blocker(item, keys, live_keys) if is_paused else None
+    if blocker:
+        result.skipped = f"sigue pausado: {blocker}"
+        return result
+
+    opportunity, source_product = origin_source(db, listing)
+    blocker = buy_source_blocker(opportunity, source_product, utcnow())
+    if blocker or opportunity is None:
+        result.skipped = f"{'sigue pausado: ' if is_paused else ''}{blocker} — sin cambios"
         return result
 
     access_token = ml._access_token  # noqa: SLF001
@@ -317,6 +416,9 @@ def optimize_listing(
     decision = decide_price(floor, current, competitors, launch_mode=launch_mode)
 
     if decision.action == "pause":
+        if is_paused:
+            result.skipped = f"sigue pausado: {decision.reason}"
+            return result
         result.actions.append(f"PAUSAR: {decision.reason}")
         result.paused = True
         if apply:
@@ -353,6 +455,15 @@ def optimize_listing(
         )
         if apply:
             listing_service.update_listing_price(db, ml, listing, new_price)
+
+    if is_paused:
+        result.actions.append(f"REACTIVAR a {new_price:,.0f} [{economics}]")
+        result.reactivated = True
+        live_keys |= keys
+        if apply:
+            listing_service.activate_listing(db, ml, listing)
+        # Catalog opt-in waits for a run where it's already active.
+        return result
 
     if (
         catalog_product_id

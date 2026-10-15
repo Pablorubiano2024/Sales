@@ -43,7 +43,7 @@ logger = get_logger(__name__)
 _MAX_SKU_LENGTH = 64
 
 
-def _build_sku(source_name: str, external_id: str) -> str:
+def build_sku(source_name: str, external_id: str) -> str:
     prefix = source_name[:3].upper()
     sku = f"{prefix}-{external_id}"
     if len(sku) <= _MAX_SKU_LENGTH:
@@ -157,7 +157,7 @@ def run_discovery(
                 product = match.product
             else:
                 product = Product(
-                    sku=_build_sku(source.name, candidate.external_id),
+                    sku=build_sku(source.name, candidate.external_id),
                     name=candidate.name,
                     category=None,
                     active=True,
