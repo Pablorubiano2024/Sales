@@ -42,21 +42,12 @@ from backend.app.core.config import get_settings  # noqa: E402
 from backend.app.core.database import SessionLocal, init_db  # noqa: E402
 from backend.app.core.logging import get_logger  # noqa: E402
 from backend.app.core.time import utcnow  # noqa: E402
-from backend.app.integrations.base import SourceAdapter  # noqa: E402
-from backend.app.integrations.falabella_source import (  # noqa: E402
-    FalabellaSourceAdapter,
-    HomecenterSourceAdapter,
-)
-from backend.app.integrations.imusa_source import (  # noqa: E402
-    ImusaSourceAdapter,
-    JumboSourceAdapter,
-)
 from backend.app.integrations.mercadolibre import MercadoLibreAdapter  # noqa: E402
 from backend.app.jobs.discovery import build_opportunity_inputs  # noqa: E402
 from backend.app.models.marketplace import ListingStatus, MarketplaceProduct  # noqa: E402
 from backend.app.models.opportunity import OpportunityStatus  # noqa: E402
 from backend.app.models.source import Source  # noqa: E402
-from backend.app.services import listing_service  # noqa: E402
+from backend.app.services import listing_draft_service, listing_service  # noqa: E402
 from backend.app.services.arbitrage_engine import evaluate_opportunity  # noqa: E402
 from backend.app.services.listing_optimizer import origin_source  # noqa: E402
 
@@ -66,13 +57,10 @@ logger = get_logger(__name__)
 # CJ-tuned Settings.shipping_cost_cop assumes international freight.
 DOMESTIC_SHIPPING_COST_COP = Decimal("15000")
 
-# Source name -> adapter factory, mirrors publish_approved_opportunities.py.
-SUPPORTED_SOURCES: dict[str, type[SourceAdapter]] = {
-    "Falabella Colombia": FalabellaSourceAdapter,
-    "Homecenter Colombia": HomecenterSourceAdapter,
-    "Imusa Colombia": ImusaSourceAdapter,
-    "Jumbo Colombia": JumboSourceAdapter,
-}
+# Source name -> adapter: the same map publishing uses, so every source we
+# can publish from is also checked daily (until 2026-10-15 this was a
+# separate 4-source copy missing Alkosto, Ktronix and Tecnologia Mayorista).
+SUPPORTED_SOURCES = listing_draft_service.SUPPORTED_SOURCES
 
 # Reclassifying below these statuses means the listing is no longer worth
 # keeping live.
