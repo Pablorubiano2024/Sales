@@ -1,0 +1,62 @@
+name: Stock check
+
+# Frequent stock check, between the daily sync-marketplace-listings.yml
+# runs. Protects MercadoLibre's "Programa de despegue" (activated
+# 2026-10-15): 5 "ventas afectadas" (claims, seller cancellations, late
+# shipments) end it, and selling something the source no longer has means
+# cancelling. So:
+#   1. scripts/sync_marketplace_listings.py — re-checks every listing's
+#      origin source; pauses what went out of stock / stopped being viable.
+#   2. scripts/optimize_listings.py --only-paused — reactivates paused
+#      listings that are back in stock and clear the ROI gate. Active
+#      listings are NOT repriced here; that stays daily.
+#
+# Every 15 minutes is the request, not a guarantee: GitHub delays and
+# sometimes skips scheduled runs (confirmed hours late on this repo), so in
+# practice this is "several times a day". Free: the repo is public. Note
+# GitHub disables schedules after 60 days without repo activity.
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {}
+
+# Never overlap with itself. Deliberately NOT shared with the daily sync:
+# GitHub keeps one pending run per group, so a queued check would cancel
+# the waiting daily run (and its repricing).
+concurrency:
+  group: stock-check
+  cancel-in-progress: false
+
+jobs:
+  stock-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Poetry
+        run: pipx install poetry
+
+      - name: Install dependencies
+        run: poetry install --no-root --only main
+
+      - name: Check stock (pause what's gone)
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ML_CLIENT_ID: ${{ secrets.ML_CLIENT_ID }}
+          ML_CLIENT_SECRET: ${{ secrets.ML_CLIENT_SECRET }}
+          ML_REDIRECT_URI: ${{ secrets.ML_REDIRECT_URI }}
+        run: poetry run python scripts/sync_marketplace_listings.py
+
+      - name: Reactivate what's back
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ML_CLIENT_ID: ${{ secrets.ML_CLIENT_ID }}
+          ML_CLIENT_SECRET: ${{ secrets.ML_CLIENT_SECRET }}
+          ML_REDIRECT_URI: ${{ secrets.ML_REDIRECT_URI }}
+        run: poetry run python scripts/optimize_listings.py --confirm --only-paused
