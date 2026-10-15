@@ -82,7 +82,7 @@ from backend.app.core.logging import get_logger
 from backend.app.core.time import utcnow
 from backend.app.integrations.mercadolibre import MercadoLibreAdapter
 from backend.app.jobs.discovery import build_sku
-from backend.app.models.marketplace import ListingStatus, MarketplaceProduct
+from backend.app.models.marketplace import ListingCatalogMatch, ListingStatus, MarketplaceProduct
 from backend.app.models.opportunity import Opportunity, OpportunityStatus
 from backend.app.models.source import Source, SourceProduct
 from backend.app.services import category_lookup, listing_service
@@ -333,6 +333,21 @@ def origin_source(
     return None, None
 
 
+def _competitor_prices(ml: MercadoLibreAdapter, catalog_ids: set[str]) -> list[Decimal] | None:
+    """Other sellers' prices across every catalog product known to be
+    ours. None when there's none to check, or any lookup failed
+    (unknown, not "no competition")."""
+    if not catalog_ids:
+        return None
+    prices: list[Decimal] = []
+    for catalog_id in sorted(catalog_ids):
+        found = ml.get_catalog_competitor_prices(catalog_id)
+        if found is None:
+            return None
+        prices.extend(found)
+    return sorted(prices)
+
+
 def optimize_listing(
     db: Session,
     ml: MercadoLibreAdapter,
@@ -407,11 +422,23 @@ def optimize_listing(
     catalog_product_id = item.get("catalog_product_id")
     catalog_product = ml.get_catalog_product(catalog_product_id) if catalog_product_id else None
     same_product = catalog_product is not None and catalog_matches(item, catalog_product)
-    competitors = (
-        ml.get_catalog_competitor_prices(catalog_product_id)
-        if same_product and catalog_product_id
-        else None
-    )
+    known_catalogs = {
+        m.catalog_product_id
+        for m in db.query(ListingCatalogMatch).filter_by(marketplace_product_id=listing.id)
+    }
+    if same_product and catalog_product_id and catalog_product_id not in known_catalogs:
+        known_catalogs.add(catalog_product_id)
+        if apply:
+            db.add(
+                ListingCatalogMatch(
+                    marketplace_product_id=listing.id, catalog_product_id=catalog_product_id
+                )
+            )
+            db.commit()
+    competitors = _competitor_prices(ml, known_catalogs)
+    if is_paused and known_catalogs and competitors is None:
+        result.skipped = "sigue pausado: no se pudo consultar la competencia"
+        return result
     current = Decimal(str(item["price"]))
     decision = decide_price(floor, current, competitors, launch_mode=launch_mode)
 

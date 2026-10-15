@@ -4,7 +4,12 @@ from backend.app.models.analytics import AnalyticsEvent, AnalyticsEventType
 from backend.app.models.lifecycle import LifecycleStage, OpportunityLifecycleEvent
 from backend.app.models.listing_draft import ListingDraft, ListingDraftStatus
 from backend.app.models.market_gap import MarketGapEvent, MarketGapEventType, MarketGapSnapshot
-from backend.app.models.marketplace import ListingStatus, Marketplace, MarketplaceProduct
+from backend.app.models.marketplace import (
+    ListingCatalogMatch,
+    ListingStatus,
+    Marketplace,
+    MarketplaceProduct,
+)
 from backend.app.models.marketplace_credential import MarketplaceCredential
 from backend.app.models.opportunity import Opportunity, OpportunityStatus
 from backend.app.models.order import CustomerShippingStatus, Order, OrderStatus
@@ -19,6 +24,7 @@ __all__ = [
     "SourceType",
     "Marketplace",
     "MarketplaceProduct",
+    "ListingCatalogMatch",
     "MarketplaceCredential",
     "ListingStatus",
     "PriceHistory",

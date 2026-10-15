@@ -10,6 +10,7 @@ from decimal import Decimal
 from backend.app.models.opportunity import Opportunity, OpportunityStatus
 from backend.app.models.source import SourceProduct
 from backend.app.services.listing_optimizer import (
+    _competitor_prices,
     buy_source_blocker,
     catalog_matches,
     decide_price,
@@ -166,3 +167,25 @@ def test_origin_source_must_be_fresh_in_stock_and_viable() -> None:
     assert buy_source_blocker(approved, _source(age_h=72), NOW)
     rejected = Opportunity(status=OpportunityStatus.REJECTED)
     assert buy_source_blocker(rejected, _source(), NOW)
+
+
+class _FakeML:
+    def __init__(self, prices: dict[str, list[Decimal] | None]) -> None:
+        self.prices = prices
+
+    def get_catalog_competitor_prices(self, catalog_id: str) -> list[Decimal] | None:
+        return self.prices[catalog_id]
+
+
+def test_competitors_checked_across_every_remembered_catalog() -> None:
+    # Xiaomi Watch 5, 2026-10-15: suggested catalog flips between an empty
+    # one and the one where 38 sellers start at 132,000.
+    ml = _FakeML({"MCO44035967": [], "MCO43319779": [D("132000"), D("140000")]})
+    prices = _competitor_prices(ml, {"MCO44035967", "MCO43319779"})  # type: ignore[arg-type]
+    assert prices == [D("132000"), D("140000")]
+
+
+def test_competitors_unknown_when_any_lookup_fails_or_none_known() -> None:
+    ml = _FakeML({"A": [D("1")], "B": None})
+    assert _competitor_prices(ml, {"A", "B"}) is None  # type: ignore[arg-type]
+    assert _competitor_prices(ml, set()) is None  # type: ignore[arg-type]

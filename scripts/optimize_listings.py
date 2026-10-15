@@ -8,12 +8,18 @@ sync refreshes each listing's real buy price and pauses anything no longer
 viable; this then sets exposure, price and catalog participation from
 that fresh buy price.
 
+--only-paused: just the reactivation check for PAUSED listings (active
+ones are read only for the no-duplicates guard, never repriced) — what
+the frequent stock check (stock-check.yml) runs, so a product back in
+stock goes live again within the hour, while repricing stays daily.
+
 DRY RUN BY DEFAULT — prints every change it would make. Pass --confirm to
 apply them for real on MercadoLibre.
 
 Usage:
     python scripts/optimize_listings.py            # dry run
     python scripts/optimize_listings.py --confirm  # for real
+    python scripts/optimize_listings.py --confirm --only-paused
 """
 
 from __future__ import annotations
@@ -30,12 +36,14 @@ from backend.app.models.marketplace import ListingStatus, MarketplaceProduct  # 
 from backend.app.services.listing_optimizer import (  # noqa: E402
     completed_sales,
     is_launch_mode,
+    listing_keys,
     optimize_listing,
 )
 
 
 def main() -> None:
     confirm = "--confirm" in sys.argv[1:]
+    only_paused = "--only-paused" in sys.argv[1:]
     init_db()
     settings = get_settings()
     db = SessionLocal()
@@ -68,6 +76,12 @@ def main() -> None:
             listings.sort(key=lambda x: x.status != ListingStatus.ACTIVE)
             live_keys: set[str] = set()
             for listing in listings:
+                if only_paused and listing.status == ListingStatus.ACTIVE:
+                    assert listing.external_id is not None
+                    info = ml.get_listing(listing.external_id)
+                    if info is not None and info.raw is not None:
+                        live_keys |= listing_keys(listing.product_id, info.raw)
+                    continue
                 try:
                     result = optimize_listing(
                         db,

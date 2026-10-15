@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import enum
 import uuid
+from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, Enum, ForeignKey, Numeric, String
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Numeric, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.app.core.database import Base
+from backend.app.core.time import utcnow
 
 if TYPE_CHECKING:
     from backend.app.models.product import Product
@@ -65,3 +67,23 @@ class MarketplaceProduct(Base):
 
     def __repr__(self) -> str:  # pragma: no cover
         return f"<MarketplaceProduct product={self.product_id} marketplace={self.marketplace_id}>"
+
+
+class ListingCatalogMatch(Base):
+    """A MercadoLibre catalog product verified (listing_optimizer.
+    catalog_matches) to be the same product as one of our listings.
+    Remembered because MercadoLibre's suggested catalog_product_id for an
+    item changes between states — 2026-10-15, Xiaomi Watch 5 Active: one
+    id while paused (no competitors), another once active (38 sellers from
+    132,000) — so without this a competitor-based pause was undone by the
+    next reactivation check."""
+
+    __tablename__ = "listing_catalog_matches"
+    __table_args__ = (UniqueConstraint("marketplace_product_id", "catalog_product_id"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    marketplace_product_id: Mapped[str] = mapped_column(
+        ForeignKey("marketplace_products.id"), index=True
+    )
+    catalog_product_id: Mapped[str] = mapped_column(String(32))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
