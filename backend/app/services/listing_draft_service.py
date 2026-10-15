@@ -85,9 +85,14 @@ def extract_model(specifications: tuple[tuple[str, str], ...]) -> str | None:
     brand/model hurt MercadoLibre's quality score, confirmed live
     2026-09-22."""
     for name, value in specifications:
-        if name.strip().lower() == "modelo":
+        if name.strip().lower() in _MODEL_SPEC_NAMES:
             return value
     return None
+
+
+# "Linea Modelo Referencia" is Alkosto/Ktronix's label (e.g. LG XBOOM
+# Mini -> "MINI.ASCALBK"), checked 2026-10-15.
+_MODEL_SPEC_NAMES = {"modelo", "linea modelo referencia"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -190,6 +195,19 @@ def generate_draft(
         )
         if real_gtin is not None:
             extra_attributes = [*extra_attributes, {"id": "GTIN", "value_name": real_gtin}]
+            covered_attribute_ids = covered_attribute_ids | {"GTIN"}
+
+    # Some sources' own product code IS the real barcode (Alkosto/Ktronix
+    # EAN-13s) — used only when its check digit is valid.
+    if "GTIN" in required_now and "GTIN" not in covered_attribute_ids:
+        source = db.get(Source, opportunity.source_id)
+        adapter_cls = SUPPORTED_SOURCES.get(source.name if source else "")
+        if (
+            adapter_cls is not None
+            and adapter_cls.external_id_is_gtin
+            and category_lookup.is_valid_gtin(live.external_id)
+        ):
+            extra_attributes = [*extra_attributes, {"id": "GTIN", "value_name": live.external_id}]
             covered_attribute_ids = covered_attribute_ids | {"GTIN"}
 
     if not set(required_now) <= (category_lookup.SAFE_ATTRIBUTE_IDS | covered_attribute_ids):

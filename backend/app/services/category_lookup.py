@@ -107,6 +107,7 @@ anything-TVs/neveras/parlantes) — no workaround for that is known.
 
 from __future__ import annotations
 
+import re
 import unicodedata
 from decimal import Decimal
 from typing import Any
@@ -316,7 +317,77 @@ _KNOWN_SYNONYMS: dict[str, str] = {
     "material de la correa": "WRISTBAND_MATERIAL",
     "color principal de la correa": "WRISTBAND_COLOR",
     "conexion bluetooth": "WITH_BLUETOOTH",
+    # Alkosto/Ktronix label, checked 2026-10-15 (values below).
+    "fuentes de alimentacion de energia": "POWER_SUPPLY_TYPE",
 }
+
+# Confirmed real source wordings for a bounded attribute value, by
+# attribute id -> normalized source value -> MercadoLibre's own value
+# name (still only used when that name is in the category's real list).
+_KNOWN_VALUE_SYNONYMS: dict[str, dict[str, str]] = {
+    "POWER_SUPPLY_TYPE": {
+        "energia electrica": "Corriente doméstica",
+        "bateria recargable interna": "Batería",
+        "bateria recargable": "Batería",
+    },
+}
+
+# Source unit words -> MercadoLibre unit names, for number_unit attributes.
+_UNIT_ALIASES: dict[str, str] = {
+    '"': '"',
+    "\u201d": '"',
+    "\u2033": '"',
+    "pulgadas": '"',
+    "pulgada": '"',
+    "pulg": '"',
+    "in": '"',
+}
+_NUMBER_WITH_UNIT = re.compile(r"^\s*(\d+(?:[.,]\d+)?)\s*([^\d\s].*?)?\s*$")
+_VOLTS = re.compile(r"(\d+)\s*v\b", re.IGNORECASE)
+
+
+def is_valid_gtin(code: str) -> bool:
+    """Real EAN-8/UPC-A/EAN-13/GTIN-14 check-digit validation."""
+    if not code.isdigit() or len(code) not in (8, 12, 13, 14):
+        return False
+    digits = [int(d) for d in code]
+    body, check = digits[:-1], digits[-1]
+    total = sum(d * (3 if i % 2 == 0 else 1) for i, d in enumerate(reversed(body)))
+    return (10 - total % 10) % 10 == check
+
+
+def _candidate_values(attr_id: str, raw_value: str) -> list[str]:
+    """The source value as-is, then each "|"-separated part (Alkosto lists
+    several, e.g. "Azul|Negro"), then confirmed wordings/volt readings."""
+    parts = [raw_value, *(p.strip() for p in raw_value.split("|") if "|" in raw_value)]
+    out = list(parts)
+    for part in parts:
+        synonym = _KNOWN_VALUE_SYNONYMS.get(attr_id, {}).get(_normalize(part))
+        if synonym:
+            out.append(synonym)
+        if attr_id == "VOLTAGE":
+            out.extend(f"{m}V" for m in _VOLTS.findall(part))
+    return out
+
+
+def _match_number_unit(attr: dict[str, Any], raw_value: str) -> str | None:
+    """A bare number ("50") or number + known unit ("50 pulgadas") ->
+    MercadoLibre's "50 \"" shape. A bare number only when the attribute
+    has exactly one allowed unit, so the unit is never guessed."""
+    units = [u["name"] for u in attr.get("allowed_units") or []]
+    match = _NUMBER_WITH_UNIT.match(raw_value)
+    if not units or match is None:
+        return None
+    number, unit_word = match.group(1).replace(",", "."), match.group(2)
+    if unit_word is None:
+        unit = units[0] if len(units) == 1 else None
+    else:
+        unit = _UNIT_ALIASES.get(_normalize(unit_word)) or (
+            unit_word if unit_word in units else None
+        )
+    if unit is None or unit not in units:
+        return None
+    return f"{number} {unit}"
 
 
 def _match_bounded_value(attr: dict[str, Any], raw_value: str) -> str | None:
@@ -344,9 +415,13 @@ def match_specifications(
     Falabella's "Tipo de pantalla" -> MercadoLibre's attribute of the same
     name), then by a small curated synonym table for confirmed real
     mismatches (see _KNOWN_SYNONYMS). Deliberately conservative:
-      - Only `value_type` "string" or "boolean" (a `number_unit`/"list"
-        attribute needs a structured {number, unit} shape or a specific
-        value_id this can't safely guess from free text).
+      - Only `value_type` "string", "boolean" or "number_unit". A
+        number_unit only from a bare number with the attribute's single
+        allowed unit, or a number + a known unit word (e.g. TV "Tamaño de
+        la pantalla" = "50" -> DISPLAY_SIZE "50 \""; 2026-10-15).
+      - Bounded values may also match per "|"-separated part, a confirmed
+        source wording (_KNOWN_VALUE_SYNONYMS) or, for VOLTAGE, the volts
+        read from the text ("Rango entre 110 V y 120 V" -> "110V").
       - Never hidden, read-only, or multivalued (submission shape for
         multiple values isn't confirmed here) attributes.
       - Never BRAND/MODEL/ITEM_CONDITION (create_listing's own params).
@@ -363,7 +438,7 @@ def match_specifications(
     eligible = {
         a["id"]: a
         for a in attributes
-        if a.get("value_type") in ("string", "boolean")
+        if a.get("value_type") in ("string", "boolean", "number_unit")
         and a["id"] not in _HANDLED_ELSEWHERE
         and not (a.get("tags") or {}).get("hidden")
         and not (a.get("tags") or {}).get("read_only")
@@ -378,7 +453,18 @@ def match_specifications(
         attr_id = by_name.get(normalized_name) or _KNOWN_SYNONYMS.get(normalized_name)
         if attr_id is None or attr_id in seen_ids or attr_id not in eligible:
             continue
-        value = _match_bounded_value(eligible[attr_id], spec_value)
+        attr = eligible[attr_id]
+        if attr.get("value_type") == "number_unit":
+            value = _match_number_unit(attr, spec_value)
+        else:
+            value = next(
+                (
+                    v
+                    for c in _candidate_values(attr_id, spec_value)
+                    if (v := _match_bounded_value(attr, c)) is not None
+                ),
+                None,
+            )
         if value is None:
             continue
         matched.append({"id": attr_id, "value_name": value})

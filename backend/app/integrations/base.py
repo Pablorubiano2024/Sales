@@ -69,6 +69,10 @@ class SourceAdapter(ABC):
     abstract, `__enter__`/`__exit__` concrete) so callers can type against
     `SourceAdapter` itself instead of each concrete subclass."""
 
+    #: True when this source's external_id IS the product's real barcode
+    #: (EAN/UPC) — lets publishing fill a required GTIN with real data.
+    external_id_is_gtin: bool = False
+
     @abstractmethod
     def close(self) -> None:
         """Release any held resources (e.g. an HTTP client)."""

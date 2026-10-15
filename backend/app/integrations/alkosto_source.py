@@ -174,6 +174,10 @@ class AlkostoSourceAdapter(SourceAdapter):
     #: against — cosmetic, but a message that always said "Alkosto" for
     #: Ktronix too would be misleading.
     source_label = "Alkosto"
+    # Product codes are the real EAN-13 (e.g. 8806096656419 = LG, 880 =
+    # Korea prefix; 7705946652742 = Kalley, 770 = Colombia), checked
+    # 2026-10-15. Only used after a checksum check (category_lookup.is_valid_gtin).
+    external_id_is_gtin = True
 
     def __init__(
         self,
