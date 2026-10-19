@@ -260,3 +260,59 @@ def test_build_sku_never_collides_for_two_ids_sharing_a_long_prefix() -> None:
     sku_a = discovery_module.build_sku("Tecnologia Mayorista", base)
     sku_b = discovery_module.build_sku("Tecnologia Mayorista", base + "-b2b")
     assert sku_a != sku_b
+
+
+class _FakeManyAdapter(_FakeRetailAdapter):
+    """Five distinct COP candidates per query."""
+
+    def search_products(self, query: str, limit: int = 20) -> list[SourceProductInfo]:
+        return [
+            SourceProductInfo(
+                external_id=f"many-{i}",
+                name=f"Unique Gadget Model {i} {query}",
+                price=Decimal("300000"),
+                currency="COP",
+                stock_available=True,
+                url=f"https://example.com/many-{i}",
+                reference_price=Decimal("500000"),
+            )
+            for i in range(5)
+        ]
+
+
+def test_discovery_does_not_reload_the_catalog_per_candidate(
+    db_session: Session, _fixed_rate_settings: Settings
+) -> None:
+    """2026-10-19: per-candidate commits expired the in-memory catalog, so
+    matching re-read every Product one by one — enough traffic to use up
+    Neon's free 5 GB monthly transfer. Reads of `products` must not grow
+    with catalog size x candidates."""
+    from sqlalchemy import event
+
+    source = Source(name="Fake Retail Source", source_type=SourceType.API)
+    marketplace = Marketplace(name="Test Marketplace")
+    db_session.add_all([source, marketplace])
+    db_session.add_all(
+        Product(sku=f"OLD-{i}", name=f"Existing Thing {i}", active=True) for i in range(30)
+    )
+    db_session.commit()
+    db_session.refresh(source)
+    db_session.refresh(marketplace)
+
+    product_selects = 0
+
+    def count(conn, cursor, statement, parameters, context, executemany) -> None:  # noqa: ANN001
+        nonlocal product_selects
+        if statement.lstrip().upper().startswith("SELECT") and "FROM products" in statement:
+            product_selects += 1
+
+    engine = db_session.get_bind()
+    event.listen(engine, "before_cursor_execute", count)
+    try:
+        run_discovery(db_session, source, _FakeManyAdapter(), marketplace.id, queries=["x", "y"])
+    finally:
+        event.remove(engine, "before_cursor_execute", count)
+
+    # 1 catalog load (+ a few incidental lookups) — not 30 products x 10 candidates.
+    assert product_selects < 15
+    assert db_session.expire_on_commit is True

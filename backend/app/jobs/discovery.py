@@ -142,82 +142,92 @@ def run_discovery(
     )
     catalog = db.query(Product).all()
     created_opportunity_ids: list[str] = []
+    # Every per-candidate commit below would otherwise expire the whole
+    # in-memory catalog, and find_best_match reading `.name` would then
+    # reload each Product with its own SELECT — ~660 queries per candidate,
+    # which used up Neon's free 5 GB monthly transfer by 2026-10-19
+    # (products: 9M index row fetches for 663 rows). Nothing here needs a
+    # Product re-read from the DB mid-run.
+    previous_expire_on_commit = db.expire_on_commit
+    db.expire_on_commit = False
+    try:
+        for query in queries:
+            # A stuck run gives no other signal to diagnose from otherwise —
+            # confirmed live 2026-09-25, a CI run hung with zero intermediate
+            # output and no way to tell which query/candidate it was on.
+            logger.info("Discovery: searching %r on %s", query, source.name)
+            candidates = adapter.search_products(query)
+            logger.info("Discovery: %r returned %d candidates", query, len(candidates))
+            for candidate in candidates:
+                match = find_best_match(candidate.name, catalog)
 
-    for query in queries:
-        # A stuck run gives no other signal to diagnose from otherwise —
-        # confirmed live 2026-09-25, a CI run hung with zero intermediate
-        # output and no way to tell which query/candidate it was on.
-        logger.info("Discovery: searching %r on %s", query, source.name)
-        candidates = adapter.search_products(query)
-        logger.info("Discovery: %r returned %d candidates", query, len(candidates))
-        for candidate in candidates:
-            match = find_best_match(candidate.name, catalog)
+                if match is not None:
+                    product = match.product
+                else:
+                    product = Product(
+                        sku=build_sku(source.name, candidate.external_id),
+                        name=candidate.name,
+                        category=None,
+                        active=True,
+                    )
+                    db.add(product)
+                    db.commit()
+                    db.refresh(product)
+                    catalog.append(product)
+                    logger.info("Discovery created new product: %s", product.name)
 
-            if match is not None:
-                product = match.product
-            else:
-                product = Product(
-                    sku=build_sku(source.name, candidate.external_id),
-                    name=candidate.name,
-                    category=None,
-                    active=True,
+                source_product = (
+                    db.query(SourceProduct)
+                    .filter_by(source_id=source.id, product_id=product.id)
+                    .first()
                 )
-                db.add(product)
-                db.commit()
-                db.refresh(product)
-                catalog.append(product)
-                logger.info("Discovery created new product: %s", product.name)
+                if source_product is None:
+                    source_product = SourceProduct(
+                        source_id=source.id,
+                        product_id=product.id,
+                        external_id=candidate.external_id,
+                        url=candidate.url,
+                        current_price=candidate.price,
+                        currency=candidate.currency,
+                        stock_available=candidate.stock_available,
+                    )
+                    db.add(source_product)
+                    db.commit()
+                    db.refresh(source_product)
+                else:
+                    source_product.current_price = candidate.price
+                    source_product.stock_available = candidate.stock_available
+                    db.add(source_product)
+                    db.commit()
 
-            source_product = (
-                db.query(SourceProduct)
-                .filter_by(source_id=source.id, product_id=product.id)
-                .first()
-            )
-            if source_product is None:
-                source_product = SourceProduct(
-                    source_id=source.id,
-                    product_id=product.id,
-                    external_id=candidate.external_id,
-                    url=candidate.url,
-                    current_price=candidate.price,
-                    currency=candidate.currency,
-                    stock_available=candidate.stock_available,
-                )
-                db.add(source_product)
-                db.commit()
-                db.refresh(source_product)
-            else:
-                source_product.current_price = candidate.price
-                source_product.stock_available = candidate.stock_available
-                db.add(source_product)
-                db.commit()
-
-            # Opportunities and thresholds (min_roi, min_net_profit) are all
-            # COP-denominated — a source quoting in another currency (e.g.
-            # CJdropshipping, in USD) has to be converted before the
-            # (currency-agnostic) pricing engine ever sees it; cheap items
-            # are also structurally unlikely to clear min_roi once real
-            # shipping is subtracted, so they're skipped rather than
-            # evaluated into a doomed Opportunity. See build_opportunity_inputs.
-            inputs = build_opportunity_inputs(
-                candidate,
-                product.id,
-                source.id,
-                marketplace_id,
-                settings,
-                shipping_cost_cop,
-                min_buy_price_cop,
-                estimated_sell_price_multiplier,
-            )
-            if inputs is None:
-                logger.info(
-                    "Skipping %s: buy_price below min_buy_price_cop=%s",
-                    candidate.name,
+                # Opportunities and thresholds (min_roi, min_net_profit) are all
+                # COP-denominated — a source quoting in another currency (e.g.
+                # CJdropshipping, in USD) has to be converted before the
+                # (currency-agnostic) pricing engine ever sees it; cheap items
+                # are also structurally unlikely to clear min_roi once real
+                # shipping is subtracted, so they're skipped rather than
+                # evaluated into a doomed Opportunity. See build_opportunity_inputs.
+                inputs = build_opportunity_inputs(
+                    candidate,
+                    product.id,
+                    source.id,
+                    marketplace_id,
+                    settings,
+                    shipping_cost_cop,
                     min_buy_price_cop,
+                    estimated_sell_price_multiplier,
                 )
-                continue
+                if inputs is None:
+                    logger.info(
+                        "Skipping %s: buy_price below min_buy_price_cop=%s",
+                        candidate.name,
+                        min_buy_price_cop,
+                    )
+                    continue
 
-            opportunity = evaluate_opportunity(db, inputs)
-            created_opportunity_ids.append(opportunity.id)
+                opportunity = evaluate_opportunity(db, inputs)
+                created_opportunity_ids.append(opportunity.id)
 
-    return created_opportunity_ids
+        return created_opportunity_ids
+    finally:
+        db.expire_on_commit = previous_expire_on_commit
