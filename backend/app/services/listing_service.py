@@ -113,7 +113,13 @@ def repair_stuck_pictures(
     sub_status = set((listing.raw or {}).get("sub_status") or []) if listing else set()
     if not STUCK_PICTURES_SUB_STATUS <= sub_status:
         return False
-    adapter.update_listing(record.external_id, pictures=[{"source": u} for u in image_urls])
+    try:
+        adapter.update_listing(record.external_id, pictures=[{"source": u} for u in image_urls])
+    except RuntimeError as exc:
+        # e.g. a 429 rate limit — never worth aborting the stock check; the
+        # next run retries.
+        logger.warning("Re-sending pictures for %s failed: %s", record.external_id, exc)
+        return False
     return True
 
 
