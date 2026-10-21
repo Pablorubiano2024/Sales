@@ -12,6 +12,7 @@ real adapter to be generic over yet.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from decimal import Decimal
 from typing import Any
 
@@ -93,6 +94,27 @@ def refresh_listing_status(
         db.commit()
         db.refresh(record)
     return record
+
+
+STUCK_PICTURES_SUB_STATUS = {"picture_download_pending", "waiting_for_patch"}
+
+
+def repair_stuck_pictures(
+    adapter: MercadoLibreAdapter, record: MarketplaceProduct, image_urls: Sequence[str]
+) -> bool:
+    """MercadoLibre keeps an item `under_review` with sub_status
+    picture_download_pending + waiting_for_patch when it couldn't use a
+    photo — it waits for the seller to send new ones (2026-10-21: 6 items
+    published with Alkosto's SVG logo as their only photo, one stuck for 6
+    days). Re-sends the source's current photos; True if it did."""
+    if record.external_id is None or not image_urls:
+        return False
+    listing = adapter.get_listing(record.external_id)
+    sub_status = set((listing.raw or {}).get("sub_status") or []) if listing else set()
+    if not STUCK_PICTURES_SUB_STATUS <= sub_status:
+        return False
+    adapter.update_listing(record.external_id, pictures=[{"source": u} for u in image_urls])
+    return True
 
 
 def pause_listing(

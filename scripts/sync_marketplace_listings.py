@@ -143,6 +143,9 @@ def main() -> None:
                         shipping_cost_cop=DOMESTIC_SHIPPING_COST_COP,
                         min_buy_price_cop=Decimal("0"),
                     )
+                    pictures = live.image_urls[: listing_draft_service.MAX_PICTURES]
+                    if listing_service.repair_stuck_pictures(ml_adapter, listing, pictures):
+                        print(f"FOTOS    {label}: reenviadas {len(pictures)} fotos de la fuente")
                     if not live.stock_available:
                         reason = "fuente de origen sin stock"
                     elif inputs is None:

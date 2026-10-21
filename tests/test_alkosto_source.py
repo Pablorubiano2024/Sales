@@ -45,11 +45,14 @@ def _product_html(
     availability: str = "InStock",
     base_price_html: str = "",
     spec_html: str = "",
+    og_image: str = "https://www.alkosto.com/medias/195950797978-001.webp",
+    gallery_html: str = "",
 ) -> str:
     return f"""
     <html><head>
-    <meta property="og:image" content="https://www.alkosto.com/medias/195950797978-001.webp"/>
+    <meta property="og:image" content="{og_image}"/>
     </head><body>
+    {gallery_html}
     {base_price_html}
     <div itemprop="brand" itemscope itemtype="https://schema.org/Brand"
          class="hidden" aria-hidden="true">
@@ -247,3 +250,48 @@ def test_ktronix_adapter_defaults_to_the_real_ktronix_base_url() -> None:
     adapter = KtronixSourceAdapter(transport=httpx.MockTransport(lambda r: httpx.Response(500)))
     assert str(adapter._client.base_url) == "https://www.ktronix.com"  # noqa: SLF001
     assert adapter.source_label == "Ktronix"
+
+
+GALLERY_HTML = """
+<div class="Sirv" data-src="https://cdn.dam.alkosto.com/products/195950797978.view"></div>
+<div class="Sirv" data-src="https://cdn.dam.alkosto.com/products/111.view"></div>
+"""
+GALLERY_INFO = {
+    "dirname": "/products/195950797978",
+    "assets": [
+        {"name": "195950797978-002.webp", "type": "image"},
+        {"name": "195950797978-001.webp", "type": "image"},
+        {"name": "spin.mp4", "type": "video"},
+    ],
+}
+
+
+def test_get_product_takes_every_photo_from_the_sirv_gallery() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "cdn.dam.alkosto.com":
+            assert request.url.path == "/products/195950797978.view"
+            return httpx.Response(200, json=GALLERY_INFO)
+        logo = "https://www.alkosto.com/medias/alkosto-logo.svg?context=x"
+        return httpx.Response(200, html=_product_html(og_image=logo, gallery_html=GALLERY_HTML))
+
+    with _adapter(handler) as adapter:
+        product = adapter.get_product("195950797978")
+
+    assert product is not None
+    assert product.image_urls == tuple(
+        f"https://cdn.dam.alkosto.com/products/195950797978/195950797978-00{n}.webp"
+        "?w=1200&format=jpg"
+        for n in (1, 2)
+    )
+
+
+def test_get_product_never_uses_the_store_logo_as_a_photo() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        logo = "https://www.alkosto.com/medias/alkosto-logo.svg?context=x"
+        return httpx.Response(200, html=_product_html(og_image=logo))
+
+    with _adapter(handler) as adapter:
+        product = adapter.get_product("195950797978")
+
+    assert product is not None
+    assert product.image_urls == ()

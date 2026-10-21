@@ -200,3 +200,30 @@ def test_update_listing_price_calls_adapter_and_persists(
 
     assert record.selling_price == Decimal("75000")
     assert adapter.price_calls == [("MCO999", Decimal("75000"))]
+
+
+@pytest.mark.parametrize(
+    ("sub_status", "resent"),
+    [
+        (["waiting_for_patch", "picture_download_pending"], True),
+        (["picture_download_pending"], False),  # still processing a new item
+        ([], False),
+    ],
+)
+def test_repair_stuck_pictures_only_resends_when_ml_waits_for_them(
+    sub_status: list[str], resent: bool
+) -> None:
+    adapter = _StubAdapter()
+    adapter.get_listing_result = MarketplaceListingInfo(
+        external_id="MCO999",
+        title="Test Widget",
+        price=Decimal("50000"),
+        currency="COP",
+        status="under_review",
+        raw={"sub_status": sub_status},
+    )
+    record = MarketplaceProduct(external_id="MCO999", selling_price=Decimal("0"))
+
+    assert listing_service.repair_stuck_pictures(adapter, record, ["https://x/1.jpg"]) is resent
+    expected = [{"external_id": "MCO999", "pictures": [{"source": "https://x/1.jpg"}]}]
+    assert adapter.update_calls == (expected if resent else [])

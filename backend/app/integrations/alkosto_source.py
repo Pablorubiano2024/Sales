@@ -106,6 +106,12 @@ _BRAND_RE = re.compile(
 )
 _BASE_PRICE_RE = re.compile(r'before-price__basePrice">\s*\$?\s*([0-9.,]+)')
 _OG_IMAGE_RE = re.compile(r'<meta property="og:image" content="([^"]+)"')
+# Since ~2026-10 product photos live on a Sirv DAM (cdn.dam.alkosto.com /
+# cdn.dam.ktronix.com) and og:image is the store's SVG logo — published
+# as-is it left 5 listings stuck in `picture_download_pending` (2026-10-21).
+# The gallery's `.view?info` lists every real photo.
+_GALLERY_VIEW_RE = r"//(cdn\.dam\.[a-z]+\.com/products/{id}\.view)"
+GALLERY_IMAGE_WIDTH = 1200  # MercadoLibre's recommended size; Sirv serves jpg on request.
 _SPEC_ITEM_RE = re.compile(
     r'data-attribute-name="([^"]+)"[^>]*>[^<]*</div>\s*<div[^>]*>([^<]*)</div>'
 )
@@ -295,8 +301,12 @@ class AlkostoSourceAdapter(SourceAdapter):
             if base_price is not None and base_price > price:
                 reference_price = base_price
 
-        og_image_match = _OG_IMAGE_RE.search(page)
-        image_urls: tuple[str, ...] = (og_image_match.group(1),) if og_image_match else ()
+        image_urls = self._gallery_images(page, external_id)
+        if not image_urls:
+            og_image_match = _OG_IMAGE_RE.search(page)
+            og_image = og_image_match.group(1) if og_image_match else ""
+            if og_image and not _is_logo(og_image):
+                image_urls = (og_image,)
 
         return SourceProductInfo(
             external_id=external_id,
@@ -310,6 +320,26 @@ class AlkostoSourceAdapter(SourceAdapter):
             image_urls=image_urls,
             brand=brand,
             specifications=_extract_specifications(page),
+        )
+
+    def _gallery_images(self, page: str, external_id: str) -> tuple[str, ...]:
+        view_match = re.search(_GALLERY_VIEW_RE.format(id=re.escape(external_id)), page)
+        if view_match is None:
+            return ()
+        view_url = f"https://{view_match.group(1)}"
+        try:
+            response = self._client.get(view_url, params={"info": ""})
+            response.raise_for_status()
+            info = response.json()
+        except (httpx.HTTPError, ValueError) as exc:
+            logger.warning("%s gallery %s failed: %s", self.source_label, view_url, exc)
+            return ()
+        host = view_url.split("/products/", 1)[0]
+        dirname = info.get("dirname", "")
+        return tuple(
+            f"{host}{dirname}/{asset['name']}?w={GALLERY_IMAGE_WIDTH}&format=jpg"
+            for asset in sorted(info.get("assets") or [], key=lambda a: a.get("name", ""))
+            if asset.get("type") == "image" and asset.get("name")
         )
 
     def get_price(self, external_id: str) -> Decimal | None:
@@ -339,3 +369,8 @@ class KtronixSourceAdapter(AlkostoSourceAdapter):
         transport: httpx.BaseTransport | None = None,
     ) -> None:
         super().__init__(base_url=base_url, timeout=timeout, transport=transport)
+
+
+def _is_logo(url: str) -> bool:
+    path = url.split("?", 1)[0].lower()
+    return path.endswith(".svg") or "logo" in path
