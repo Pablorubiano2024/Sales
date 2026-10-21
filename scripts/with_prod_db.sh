@@ -16,4 +16,15 @@ if grep -q '\.\.\.' "$url_file"; then
   exit 1
 fi
 
+# Optional: MercadoLibre app credentials (ML_CLIENT_ID=..., ML_CLIENT_SECRET=...,
+# ML_REDIRECT_URI=... one per line), so an expired access token can be
+# refreshed locally instead of waiting for the next GitHub Actions run.
+ml_file="${HOME}/.sales_ml_env"
+if [[ -s "$ml_file" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "$ml_file"
+  set +a
+fi
+
 DATABASE_URL="$(cat "$url_file")" exec "$@"
