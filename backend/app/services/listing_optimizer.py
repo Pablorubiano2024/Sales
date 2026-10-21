@@ -39,7 +39,11 @@ every listing is priced AT the floor (cheapest price that still clears
 MIN_ROI / MIN_NET_PROFIT — the user's own rule, 2026-10-13: "lo que
 consideres más óptimo", no paid Product Ads), still paused when a
 same-product competitor is cheaper than that floor, and no new catalog
-opt-ins. Switches back to normal mode on its own after those first sales.
+opt-ins — except for an item tagged `catalog_forewarning`: MercadoLibre
+pauses those unless they join the catalog (emailed "avisos próximos a
+pausarse", 2026-10-21, both Xiaomi Redmi Watch 6), so opting in at the
+same ROI-cleared price beats losing the listing. Switches back to normal
+mode on its own after those first sales.
 
 BUY SOURCE — always the listing's ORIGIN source (the one its SKU was
 built from, `origin_source`), never another source discovery attached to
@@ -226,7 +230,14 @@ def catalog_matches(item: dict, catalog_product: dict) -> bool:
     Redmi Watch 6 (2.07") — a different product; our Galaxy Watch 8's
     MODEL is the manufacturer code while the catalog's is the commercial
     name — the same product. So: same MODEL, or same brand + same numbers
-    in the name (size/capacity/version) + same variant words."""
+    in the name (size/capacity/version) + same variant words.
+
+    An item tagged `catalog_forewarning` is one MercadoLibre itself
+    already identified with this catalog product (and will pause unless
+    it joins), so the catalog's shorter name only has to have no number
+    ours lacks (2026-10-21: "Redmi Watch 6 Blue" for our "Redmi Watch 6
+    Pantalla Amoled De 2.07"). Brand and variant words must still match,
+    so a Lite is never taken for the plain model."""
     our_model = _normalize(_attr(item.get("attributes"), "MODEL"))
     their_model = _normalize(_attr(catalog_product.get("attributes"), "MODEL"))
     if our_model and our_model == their_model:
@@ -236,7 +247,11 @@ def catalog_matches(item: dict, catalog_product: dict) -> bool:
     if not our_brand or our_brand != their_brand:
         return False
     title, name = item.get("title"), catalog_product.get("name")
-    return _numbers(title) == _numbers(name) and _variants(title) == _variants(name)
+    if _variants(title) != _variants(name):
+        return False
+    if "catalog_forewarning" in (item.get("tags") or []):
+        return _numbers(name) <= _numbers(title)
+    return _numbers(title) == _numbers(name)
 
 
 @dataclass
@@ -305,6 +320,18 @@ def is_launch_mode(ml: MercadoLibreAdapter) -> bool:
     profitable) side when we can't tell."""
     sales = completed_sales(ml)
     return sales is None or sales < LAUNCH_MODE_MAX_SALES
+
+
+def should_opt_in_catalog(item: dict, *, launch_mode: bool) -> bool:
+    """Eligible, not already a catalog item, and either past launch mode
+    or forewarned (MercadoLibre will pause it otherwise)."""
+    tags = item.get("tags") or []
+    return (
+        (not launch_mode or "catalog_forewarning" in tags)
+        and "catalog_listing_eligible" in tags
+        and not item.get("catalog_listing")
+        and not item.get("item_relations")
+    )
 
 
 def origin_source(
@@ -492,14 +519,7 @@ def optimize_listing(
         # Catalog opt-in waits for a run where it's already active.
         return result
 
-    if (
-        catalog_product_id
-        and same_product
-        and not launch_mode
-        and "catalog_listing_eligible" in (item.get("tags") or [])
-        and not item.get("catalog_listing")
-        and not item.get("item_relations")
-    ):
+    if catalog_product_id and same_product and should_opt_in_catalog(item, launch_mode=launch_mode):
         result.actions.append(f"inscribir en catálogo {catalog_product_id}")
         if apply:
             created = ml.opt_in_catalog(listing.external_id, catalog_product_id)

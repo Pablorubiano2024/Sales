@@ -19,6 +19,7 @@ from backend.app.services.listing_optimizer import (
     reactivation_blocker,
     round_price_down,
     round_price_up,
+    should_opt_in_catalog,
 )
 
 D = Decimal
@@ -189,3 +190,28 @@ def test_competitors_unknown_when_any_lookup_fails_or_none_known() -> None:
     ml = _FakeML({"A": [D("1")], "B": None})
     assert _competitor_prices(ml, {"A", "B"}) is None  # type: ignore[arg-type]
     assert _competitor_prices(ml, set()) is None  # type: ignore[arg-type]
+
+
+def test_launch_mode_opts_in_only_forewarned_items():
+    eligible = {"tags": ["catalog_listing_eligible"]}
+    forewarned = {"tags": ["catalog_listing_eligible", "catalog_forewarning"]}
+    assert not should_opt_in_catalog(eligible, launch_mode=True)
+    assert should_opt_in_catalog(forewarned, launch_mode=True)
+    assert should_opt_in_catalog(eligible, launch_mode=False)
+    assert not should_opt_in_catalog(
+        {**forewarned, "item_relations": [{"id": "MCO1"}]}, launch_mode=True
+    )
+
+
+def test_forewarned_item_matches_shorter_catalog_name():
+    attrs = [{"id": "BRAND", "value_name": "Xiaomi"}, {"id": "MODEL", "value_name": "M2523W1"}]
+    item = {"title": "Reloj Xiaomi Redmi Watch 6 Pantalla Amoled De 2.07", "attributes": attrs}
+    catalog = {
+        "name": "Redmi Watch 6 Blue",
+        "attributes": [{"id": "BRAND", "value_name": "Xiaomi"}, {"id": "MODEL", "value_name": "6"}],
+    }
+    assert not catalog_matches(item, catalog)
+    forewarned = {**item, "tags": ["catalog_forewarning"]}
+    assert catalog_matches(forewarned, catalog)
+    lite = {**forewarned, "title": "Xiaomi Redmi Watch 6 Lite Amoled 1.96"}
+    assert not catalog_matches(lite, catalog)
