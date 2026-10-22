@@ -73,6 +73,12 @@ class Settings(BaseSettings):
     # app/slack_notifier.py. When unset, alerts are skipped (never queued,
     # never silently dropped after being "sent").
     slack_webhook_url: str | None = None
+    # Sale alerts (backend/app/services/sale_alerts.py): a bot token
+    # (xoxb-..., scopes chat:write + reactions:read) and the channel ID the
+    # bot was invited to. A webhook can't read the ✅ reaction that stops
+    # the reminders, hence the bot.
+    slack_bot_token: str | None = None
+    slack_sales_channel: str | None = None
 
     # --- Arbitrage thresholds (defaults; configurable, never hard-coded inline) ---
     min_roi: Decimal = Decimal("0.30")

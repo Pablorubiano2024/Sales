@@ -27,4 +27,13 @@ if [[ -s "$ml_file" ]]; then
   set +a
 fi
 
+# Optional: Slack sale alerts (SLACK_BOT_TOKEN=..., SLACK_SALES_CHANNEL=...).
+slack_file="${HOME}/.sales_slack_env"
+if [[ -s "$slack_file" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "$slack_file"
+  set +a
+fi
+
 DATABASE_URL="$(cat "$url_file")" exec "$@"

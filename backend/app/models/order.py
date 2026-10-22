@@ -14,7 +14,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Numeric, String
+from sqlalchemy import DateTime, Enum, ForeignKey, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.app.core.database import Base
@@ -79,3 +79,19 @@ class Order(Base):
 
     def __repr__(self) -> str:  # pragma: no cover
         return f"<Order product={self.product_id} status={self.status.value}>"
+
+
+class SaleAlert(Base):
+    """Slack alert for one sale, re-sent until someone reacts ✅ to any of
+    its messages (sale_alerts.py). Its own table so production gets it from
+    init_db's create_all, no column migration on `orders`."""
+
+    __tablename__ = "sale_alerts"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    order_id: Mapped[str] = mapped_column(ForeignKey("orders.id"), unique=True, index=True)
+    # JSON list of every message's Slack ts — a ✅ on any of them counts.
+    message_ts: Mapped[str] = mapped_column(Text, default="[]")
+    last_sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

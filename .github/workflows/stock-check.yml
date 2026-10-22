@@ -7,6 +7,8 @@ name: Stock check
 # cancelling. So:
 #   1. scripts/sync_marketplace_listings.py — re-checks every listing's
 #      origin source; pauses what went out of stock / stopped being viable.
+#   0. scripts/notify_sales.py — imports new sales and alerts Slack,
+#      repeating every run until someone reacts ✅.
 #   2. scripts/optimize_listings.py --only-paused — reactivates paused
 #      listings that are back in stock and clear the ROI gate. Active
 #      listings are NOT repriced here; that stays daily.
@@ -44,6 +46,16 @@ jobs:
 
       - name: Install dependencies
         run: poetry install --no-root --only main
+
+      - name: Alert new sales on Slack
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ML_CLIENT_ID: ${{ secrets.ML_CLIENT_ID }}
+          ML_CLIENT_SECRET: ${{ secrets.ML_CLIENT_SECRET }}
+          ML_REDIRECT_URI: ${{ secrets.ML_REDIRECT_URI }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_SALES_CHANNEL: ${{ secrets.SLACK_SALES_CHANNEL }}
+        run: poetry run python scripts/notify_sales.py
 
       - name: Check stock (pause what's gone)
         env:

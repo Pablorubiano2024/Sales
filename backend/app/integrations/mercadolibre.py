@@ -424,6 +424,22 @@ class MercadoLibreAdapter(MarketplaceAdapter):
                 return Decimal(str(sender["cost"]))
         return None
 
+    def get_dispatch_deadline(self, order_id: str) -> str | None:
+        """When MercadoLibre expects this sale handed to Mercado Envíos:
+        GET /orders/{id} -> shipping.id -> /shipments/{id}/sla expected_date
+        (ISO, e.g. "2026-10-22T23:59:59-05:00")."""
+        order = self._client.get(f"/orders/{order_id}", headers=self._auth_headers())
+        if order.status_code != 200:
+            return None
+        shipment_id = (order.json().get("shipping") or {}).get("id")
+        if not shipment_id:
+            return None
+        sla = self._client.get(f"/shipments/{shipment_id}/sla", headers=self._auth_headers())
+        if sla.status_code != 200:
+            return None
+        deadline: str | None = sla.json().get("expected_date")
+        return deadline
+
     def get_me(self) -> dict[str, Any] | None:
         """GET /users/me — the account itself, incl. seller_reputation."""
         response = self._client.get("/users/me", headers=self._auth_headers())

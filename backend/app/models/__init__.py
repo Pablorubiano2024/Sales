@@ -12,7 +12,7 @@ from backend.app.models.marketplace import (
 )
 from backend.app.models.marketplace_credential import MarketplaceCredential
 from backend.app.models.opportunity import Opportunity, OpportunityStatus
-from backend.app.models.order import CustomerShippingStatus, Order, OrderStatus
+from backend.app.models.order import CustomerShippingStatus, Order, OrderStatus, SaleAlert
 from backend.app.models.price_history import PriceHistory
 from backend.app.models.product import Product
 from backend.app.models.source import Source, SourceProduct, SourceType
@@ -33,6 +33,7 @@ __all__ = [
     "Order",
     "OrderStatus",
     "CustomerShippingStatus",
+    "SaleAlert",
     "LifecycleStage",
     "OpportunityLifecycleEvent",
     "MarketGapEvent",
