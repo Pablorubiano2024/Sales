@@ -158,3 +158,29 @@ def test_run_order_sync_resolves_and_links_the_real_opportunity(db_session: Sess
 
     order = db_session.query(Order).filter_by(marketplace_order_id="ML-4").one()
     assert order.opportunity_id == opportunity.id
+
+
+def test_run_order_sync_records_real_commission_and_shipping(db_session: Session) -> None:
+    _make_listing(db_session, external_id="MCO777")
+    adapter = MagicMock()
+    adapter.get_seller_shipping_cost.return_value = Decimal("8500")
+    adapter.get_orders.return_value = [
+        MarketplaceOrderInfo(
+            external_id="ORD-FEES",
+            status="paid",
+            total_amount=Decimal("92900"),
+            currency="COP",
+            item_external_id="MCO777",
+            raw={
+                "order_items": [{"sale_fee": 14400, "quantity": 1}],
+                "shipping": {"id": 48320713704},
+            },
+        )
+    ]
+
+    run_order_sync(db_session, adapter)
+
+    order = db_session.query(Order).filter_by(marketplace_order_id="ORD-FEES").one()
+    assert order.marketplace_fees == Decimal("14400")
+    assert order.shipping_cost == Decimal("8500")
+    adapter.get_seller_shipping_cost.assert_called_once_with(48320713704)

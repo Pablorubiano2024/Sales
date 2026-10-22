@@ -413,6 +413,17 @@ class MercadoLibreAdapter(MarketplaceAdapter):
         cost = ((response.json().get("coverage") or {}).get("all_country") or {}).get("list_cost")
         return None if cost is None else Decimal(str(cost))
 
+    def get_seller_shipping_cost(self, shipment_id: int | str) -> Decimal | None:
+        """What WE pay for a sale's Mercado Envíos shipment: our entry in
+        GET /shipments/{id}/costs `senders` (first sale 2026-10-22: 8,500)."""
+        response = self._client.get(f"/shipments/{shipment_id}/costs", headers=self._auth_headers())
+        if response.status_code != 200:
+            return None
+        for sender in response.json().get("senders") or []:
+            if sender.get("user_id") == self._user_id and sender.get("cost") is not None:
+                return Decimal(str(sender["cost"]))
+        return None
+
     def get_me(self) -> dict[str, Any] | None:
         """GET /users/me — the account itself, incl. seller_reputation."""
         response = self._client.get("/users/me", headers=self._auth_headers())

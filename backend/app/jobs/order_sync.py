@@ -8,9 +8,12 @@ exists (Phase 7).
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 from sqlalchemy.orm import Session
 
 from backend.app.core.logging import get_logger
+from backend.app.integrations.base import MarketplaceOrderInfo
 from backend.app.integrations.mercadolibre import MercadoLibreAdapter
 from backend.app.models.marketplace import MarketplaceProduct
 from backend.app.models.opportunity import Opportunity
@@ -33,6 +36,25 @@ def _resolve_opportunity_id(db: Session, product_id: str) -> str | None:
         .first()
     )
     return opportunity.id if opportunity is not None else None
+
+
+def _sale_costs(
+    adapter: MercadoLibreAdapter, order_info: MarketplaceOrderInfo
+) -> tuple[Decimal, Decimal]:
+    """MercadoLibre's real commission (order_items[].sale_fee, per unit)
+    and our share of the shipment — without them the first sale was
+    recorded at 43,000 profit instead of ~20,100 (2026-10-22)."""
+    raw = order_info.raw or {}
+    fees = sum(
+        (
+            Decimal(str(line.get("sale_fee") or 0)) * int(line.get("quantity") or 1)
+            for line in raw.get("order_items") or []
+        ),
+        Decimal("0"),
+    )
+    shipment_id = (raw.get("shipping") or {}).get("id")
+    shipping = adapter.get_seller_shipping_cost(shipment_id) if shipment_id else None
+    return fees, shipping if isinstance(shipping, Decimal) else Decimal("0")
 
 
 def run_order_sync(db: Session, adapter: MercadoLibreAdapter, since: str | None = None) -> int:
@@ -65,10 +87,13 @@ def run_order_sync(db: Session, adapter: MercadoLibreAdapter, since: str | None 
             )
             continue
 
+        fees, shipping = _sale_costs(adapter, order_info)
         create_order_from_sale(
             db,
             product_id=listing.product_id,
             selling_price=order_info.total_amount,
+            marketplace_fees=fees,
+            shipping_cost=shipping,
             marketplace_order_id=order_info.external_id,
             opportunity_id=_resolve_opportunity_id(db, listing.product_id),
         )
