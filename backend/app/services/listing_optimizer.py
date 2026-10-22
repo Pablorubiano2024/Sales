@@ -45,6 +45,10 @@ pausarse", 2026-10-21, both Xiaomi Redmi Watch 6), so opting in at the
 same ROI-cleared price beats losing the listing. Switches back to normal
 mode on its own after those first sales.
 
+HANDLING TIME — every listing gets MercadoLibre's "tiempo de disponibilidad"
+(mercadolibre.HANDLING_TIME), whatever else is skipped below: the source
+store has to deliver to us before we can dispatch.
+
 BUY SOURCE — always the listing's ORIGIN source (the one its SKU was
 built from, `origin_source`), never another source discovery attached to
 the same product: checked 2026-10-15, those cross-source matches are
@@ -84,7 +88,11 @@ from sqlalchemy.orm import Session
 from backend.app.core.config import Settings
 from backend.app.core.logging import get_logger
 from backend.app.core.time import utcnow
-from backend.app.integrations.mercadolibre import MercadoLibreAdapter
+from backend.app.integrations.mercadolibre import (
+    HANDLING_TIME,
+    MercadoLibreAdapter,
+    with_handling_time,
+)
 from backend.app.jobs.discovery import build_sku
 from backend.app.models.marketplace import ListingCatalogMatch, ListingStatus, MarketplaceProduct
 from backend.app.models.opportunity import Opportunity, OpportunityStatus
@@ -400,6 +408,11 @@ def optimize_listing(
         result.skipped = f"estado real '{item.get('status')}'"
         return result
     is_paused = item["status"] == "paused"
+    sale_terms = with_handling_time(item.get("sale_terms"))
+    if sale_terms is not None:
+        result.actions.append(f"tiempo de disponibilidad {HANDLING_TIME}")
+        if apply:
+            ml.update_listing(listing.external_id, sale_terms=sale_terms)
     keys = listing_keys(listing.product_id, item)
     if not is_paused:
         live_keys |= keys

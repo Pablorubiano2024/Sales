@@ -47,6 +47,28 @@ MARKETPLACE_NAME = "MercadoLibre Colombia"
 EXPIRY_SAFETY_MARGIN = timedelta(minutes=5)
 
 
+# Every item's "tiempo de disponibilidad" (sale term MANUFACTURING_TIME).
+# Without it MercadoLibre assumes stock on hand and wants it dispatched
+# the next day — impossible when the source store delivers to us first
+# (first sale, 2026-10-22). The user chose 3 days.
+HANDLING_TIME = "3 días"
+
+
+def with_handling_time(sale_terms: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
+    """`sale_terms` with MANUFACTURING_TIME set to HANDLING_TIME (others
+    kept), or None if it's already set that way."""
+    terms = list(sale_terms or [])
+    for term in terms:
+        if term.get("id") == "MANUFACTURING_TIME" and term.get("value_name") == HANDLING_TIME:
+            return None
+    others = [
+        {"id": t["id"], "value_name": t["value_name"]}
+        for t in terms
+        if t.get("id") != "MANUFACTURING_TIME" and t.get("value_name")
+    ]
+    return [*others, {"id": "MANUFACTURING_TIME", "value_name": HANDLING_TIME}]
+
+
 class MercadoLibreAdapter(MarketplaceAdapter):
     """Adapter for MercadoLibre Colombia. Requires a `db.Session` because,
     unlike a stateless API-key source like CJdropshipping, it has to load
@@ -256,6 +278,7 @@ class MercadoLibreAdapter(MarketplaceAdapter):
                 {"id": "MODEL", "value_name": model},
                 *(extra_attributes or []),
             ],
+            "sale_terms": with_handling_time(None),
         }
         if pictures:
             payload["pictures"] = [{"source": url} for url in pictures]

@@ -429,3 +429,14 @@ def test_get_orders_handles_missing_item_gracefully(
 
     assert len(orders) == 1
     assert orders[0].item_external_id is None
+
+
+def test_with_handling_time_sets_it_once_and_keeps_other_terms() -> None:
+    from backend.app.integrations.mercadolibre import HANDLING_TIME, with_handling_time
+
+    warranty = {"id": "WARRANTY_TIME", "value_name": "6 meses", "values": []}
+    assert with_handling_time([warranty, {"id": "MANUFACTURING_TIME", "value_name": "1 días"}]) == [
+        {"id": "WARRANTY_TIME", "value_name": "6 meses"},
+        {"id": "MANUFACTURING_TIME", "value_name": HANDLING_TIME},
+    ]
+    assert with_handling_time([{"id": "MANUFACTURING_TIME", "value_name": HANDLING_TIME}]) is None
