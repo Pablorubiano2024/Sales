@@ -141,6 +141,7 @@ def run_discovery(
         min_buy_price_cop if min_buy_price_cop is not None else settings.min_buy_price_cop
     )
     catalog = db.query(Product).all()
+    catalog_by_sku = {product.sku: product for product in catalog}
     created_opportunity_ids: list[str] = []
     # Every per-candidate commit below would otherwise expire the whole
     # in-memory catalog, and find_best_match reading `.name` would then
@@ -159,13 +160,21 @@ def run_discovery(
             candidates = adapter.search_products(query)
             logger.info("Discovery: %r returned %d candidates", query, len(candidates))
             for candidate in candidates:
-                match = find_best_match(candidate.name, catalog)
+                # Same source item first, by its SKU: a published product's
+                # name is replaced by the source's detail-page name, so the
+                # fuzzy name match can miss it and the insert then hit
+                # ix_products_sku (Homecenter failed daily, 2026-10-22).
+                sku = build_sku(source.name, candidate.external_id)
+                product = catalog_by_sku.get(sku)
+                match = find_best_match(candidate.name, catalog) if product is None else None
 
-                if match is not None:
+                if product is not None:
+                    pass
+                elif match is not None:
                     product = match.product
                 else:
                     product = Product(
-                        sku=build_sku(source.name, candidate.external_id),
+                        sku=sku,
                         name=candidate.name,
                         category=None,
                         active=True,
@@ -174,6 +183,7 @@ def run_discovery(
                     db.commit()
                     db.refresh(product)
                     catalog.append(product)
+                    catalog_by_sku[product.sku] = product
                     logger.info("Discovery created new product: %s", product.name)
 
                 source_product = (

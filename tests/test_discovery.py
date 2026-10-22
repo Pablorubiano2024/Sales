@@ -12,11 +12,11 @@ from sqlalchemy.orm import Session
 from backend.app.core.config import Settings
 from backend.app.integrations.base import SourceAdapter, SourceProductInfo
 from backend.app.jobs import discovery as discovery_module
-from backend.app.jobs.discovery import run_discovery
+from backend.app.jobs.discovery import build_sku, run_discovery
 from backend.app.models.marketplace import Marketplace
 from backend.app.models.opportunity import Opportunity
 from backend.app.models.product import Product
-from backend.app.models.source import Source, SourceType
+from backend.app.models.source import Source, SourceProduct, SourceType
 
 
 class _FakeUsdAdapter(SourceAdapter):
@@ -316,3 +316,23 @@ def test_discovery_does_not_reload_the_catalog_per_candidate(
     # 1 catalog load (+ a few incidental lookups) — not 30 products x 10 candidates.
     assert product_selects < 15
     assert db_session.expire_on_commit is True
+
+
+def test_discovery_reuses_a_renamed_product_by_its_sku(
+    db_session: Session, _fixed_rate_settings: Settings
+) -> None:
+    """2026-10-22: publishing renamed HOM-118667249 to its detail-page name,
+    the fuzzy match then missed it and the re-insert broke ix_products_sku."""
+    source = Source(name="Fake Retail Source", source_type=SourceType.API)
+    marketplace = Marketplace(name="Test Marketplace")
+    db_session.add_all([source, marketplace])
+    db_session.commit()
+    sku = build_sku(source.name, "retail-1")
+    renamed = Product(sku=sku, name="Totally Different Detail Page Name", active=True)
+    db_session.add(renamed)
+    db_session.commit()
+
+    run_discovery(db_session, source, _FakeRetailAdapter(), marketplace.id, queries=["blender"])
+
+    assert db_session.query(Product).filter_by(sku=sku).count() == 1
+    assert db_session.query(SourceProduct).one().product_id == renamed.id
