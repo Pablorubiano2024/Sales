@@ -149,6 +149,8 @@ def test_reactivation_only_undoes_our_own_pause_with_ml_stock() -> None:
     assert reactivation_blocker(PAUSED_BY_US, keys, set()) is None
     assert reactivation_blocker({**PAUSED_BY_US, "sub_status": ["suspended"]}, keys, set())
     assert reactivation_blocker({**PAUSED_BY_US, "available_quantity": 0}, keys, set())
+    sold_out = {**PAUSED_BY_US, "sub_status": ["out_of_stock"], "available_quantity": 0}
+    assert reactivation_blocker(sold_out, keys, set()) is None
 
 
 def test_never_reactivates_a_duplicate() -> None:

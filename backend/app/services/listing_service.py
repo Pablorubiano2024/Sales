@@ -140,7 +140,8 @@ def activate_listing(db: Session, adapter: MercadoLibreAdapter, record: Marketpl
     ROI-gated reactivation)."""
     if record.external_id is None:
         return
-    adapter.update_listing(record.external_id, status="active")
+    # A sold-out item comes back with 0 units; we always list one at a time.
+    adapter.update_listing(record.external_id, status="active", available_quantity=1)
     record.status = ListingStatus.ACTIVE
     db.commit()
     logger.info("Reactivated ML item=%s (product=%s)", record.external_id, record.product_id)

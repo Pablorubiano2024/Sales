@@ -302,10 +302,15 @@ def listing_keys(product_id: str, item: dict) -> set[str]:
 
 def reactivation_blocker(item: dict, keys: set[str], live_keys: set[str]) -> str | None:
     """Why a paused item must stay paused regardless of price, or None.
-    Only pauses we made are ours to undo, and never into a duplicate."""
-    if item.get("sub_status") != ["paused_by_seller"]:
-        return f"pausado por MercadoLibre ({item.get('sub_status')})"
-    if not item.get("available_quantity"):
+    Only pauses we made — or a sell-out (`out_of_stock`: its last unit
+    sold, first sale 2026-10-22; reactivation restocks it) — are ours to
+    undo, and never into a duplicate."""
+    sub_status = item.get("sub_status")
+    if sub_status == ["out_of_stock"]:
+        pass
+    elif sub_status != ["paused_by_seller"]:
+        return f"pausado por MercadoLibre ({sub_status})"
+    elif not item.get("available_quantity"):
         return "sin stock en MercadoLibre"
     if keys & live_keys:
         return "ya hay otro aviso activo del mismo producto"
