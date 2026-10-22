@@ -10,11 +10,12 @@ name: Market Gap Scan
 # the other daily workflows, so it doesn't try to compensate for the
 # ~4.5h scheduled-run delay documented in discover-opportunities.yml's
 # cron comment (confirmed live 2026-09-26) — landing a few hours later
-# than the nominal every-6-hours slot doesn't break anything here, it
-# just means the real snapshot cadence is closer to "several times a
-# day" than exactly every 6 hours. That's still the finest reasonable
-# cadence given that delay (the user's original 10-minute ask isn't
-# achievable on GitHub Actions' free scheduler).
+# than the nominal slot doesn't break anything here.
+#
+# Once a day (was every 6 hours until 2026-10-22): it's the heaviest
+# writer to the database and only feeds analytics/opportunity scoring —
+# prices and pauses come from the stock check and the daily optimizer.
+# Cut to stay inside Neon's free 5 GB monthly transfer.
 #
 # Requires these repo secrets (Settings -> Secrets and variables ->
 # Actions): DATABASE_URL, ML_CLIENT_ID, ML_CLIENT_SECRET, ML_REDIRECT_URI
@@ -27,7 +28,7 @@ name: Market Gap Scan
 
 on:
   schedule:
-    - cron: "0 */6 * * *"
+    - cron: "0 9 * * *"
   workflow_dispatch: {}
 
 jobs:
