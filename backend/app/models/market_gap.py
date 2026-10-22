@@ -14,7 +14,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import DateTime, Enum, ForeignKey, Index, Integer, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.app.core.database import Base
@@ -36,6 +36,12 @@ class MarketGapSnapshot(Base):
     """One real Buy Box reading for a catalog_product_id at a point in time."""
 
     __tablename__ = "market_gap_snapshots"
+    # "Latest snapshot for this opportunity" runs per opportunity on every
+    # scan/validation; with only single-column indexes Postgres walked
+    # captured_at and filtered — 120M index reads by 2026-10-22.
+    __table_args__ = (
+        Index("ix_market_gap_snapshots_opp_captured", "opportunity_id", "captured_at"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     catalog_product_id: Mapped[str] = mapped_column(String(64), index=True)
