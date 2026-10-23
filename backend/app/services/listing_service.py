@@ -96,7 +96,7 @@ def refresh_listing_status(
     return record
 
 
-STUCK_PICTURES_SUB_STATUS = {"picture_download_pending", "waiting_for_patch"}
+WAITING_FOR_PATCH = "waiting_for_patch"
 
 
 def repair_stuck_pictures(
@@ -106,12 +106,16 @@ def repair_stuck_pictures(
     picture_download_pending + waiting_for_patch when it couldn't use a
     photo — it waits for the seller to send new ones (2026-10-21: 6 items
     published with Alkosto's SVG logo as their only photo, one stuck for 6
-    days). Re-sends the source's current photos; True if it did."""
+    days). After a first re-send it can drop picture_download_pending and
+    keep only waiting_for_patch — the Electrolux Pure i9 sat like that for
+    2 days until its photos were sent again (2026-10-23) — so
+    waiting_for_patch alone is the signal. Re-sends the source's current
+    photos; True if it did."""
     if record.external_id is None or not image_urls:
         return False
     listing = adapter.get_listing(record.external_id)
     sub_status = set((listing.raw or {}).get("sub_status") or []) if listing else set()
-    if not STUCK_PICTURES_SUB_STATUS <= sub_status:
+    if WAITING_FOR_PATCH not in sub_status:
         return False
     try:
         adapter.update_listing(record.external_id, pictures=[{"source": u} for u in image_urls])

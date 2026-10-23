@@ -206,6 +206,7 @@ def test_update_listing_price_calls_adapter_and_persists(
     ("sub_status", "resent"),
     [
         (["waiting_for_patch", "picture_download_pending"], True),
+        (["waiting_for_patch"], True),  # left after a first re-send
         (["picture_download_pending"], False),  # still processing a new item
         ([], False),
     ],
