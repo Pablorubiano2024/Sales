@@ -76,7 +76,6 @@ and only writes when `apply=True`.
 
 from __future__ import annotations
 
-import re
 import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -98,6 +97,7 @@ from backend.app.models.marketplace import ListingCatalogMatch, ListingStatus, M
 from backend.app.models.opportunity import Opportunity, OpportunityStatus
 from backend.app.models.source import Source, SourceProduct
 from backend.app.services import category_lookup, listing_service
+from backend.app.services.product_matcher import name_numbers, name_variants
 
 logger = get_logger(__name__)
 
@@ -107,20 +107,6 @@ CATALOG_UNDERCUT = Decimal("0.01")
 MAX_FLOOR_ITERATIONS = 8
 LAUNCH_MODE_MAX_SALES = 5
 GENERIC_MODEL = "Genérico"
-# Words that make a different product of the same line ("Watch 6" vs "Watch 6 Lite").
-VARIANT_WORDS = {
-    "lite",
-    "pro",
-    "max",
-    "plus",
-    "mini",
-    "ultra",
-    "classic",
-    "se",
-    "fe",
-    "neo",
-    "active",
-}
 
 
 def round_price_up(price: Decimal) -> Decimal:
@@ -217,21 +203,6 @@ def _attr(attributes: list[dict] | None, attr_id: str) -> str | None:
     return None
 
 
-def _numbers(text: str | None) -> set[str]:
-    return set(re.findall(r"\d+", text or ""))
-
-
-def _variants(text: str | None) -> set[str]:
-    words = set(re.findall(r"[a-z]+", _ascii_lower(text)))
-    return words & VARIANT_WORDS
-
-
-def _ascii_lower(text: str | None) -> str:
-    if not text:
-        return ""
-    return unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii").lower()
-
-
 def catalog_matches(item: dict, catalog_product: dict) -> bool:
     """Is MercadoLibre's suggested catalog product really OUR product?
     Guards both catalog opt-in and competitor-based pricing. Real cases
@@ -256,11 +227,11 @@ def catalog_matches(item: dict, catalog_product: dict) -> bool:
     if not our_brand or our_brand != their_brand:
         return False
     title, name = item.get("title"), catalog_product.get("name")
-    if _variants(title) != _variants(name):
+    if name_variants(title) != name_variants(name):
         return False
     if "catalog_forewarning" in (item.get("tags") or []):
-        return _numbers(name) <= _numbers(title)
-    return _numbers(title) == _numbers(name)
+        return name_numbers(name) <= name_numbers(title)
+    return name_numbers(title) == name_numbers(name)
 
 
 @dataclass

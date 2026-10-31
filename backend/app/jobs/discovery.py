@@ -142,6 +142,11 @@ def run_discovery(
     )
     catalog = db.query(Product).all()
     catalog_by_sku = {product.sku: product for product in catalog}
+    catalog_by_id = {product.id: product for product in catalog}
+    product_id_by_external_id = {
+        source_product.external_id: source_product.product_id
+        for source_product in db.query(SourceProduct).filter_by(source_id=source.id)
+    }
     created_opportunity_ids: list[str] = []
     # Every per-candidate commit below would otherwise expire the whole
     # in-memory catalog, and find_best_match reading `.name` would then
@@ -160,13 +165,31 @@ def run_discovery(
             candidates = adapter.search_products(query)
             logger.info("Discovery: %r returned %d candidates", query, len(candidates))
             for candidate in candidates:
-                # Same source item first, by its SKU: a published product's
-                # name is replaced by the source's detail-page name, so the
-                # fuzzy name match can miss it and the insert then hit
-                # ix_products_sku (Homecenter failed daily, 2026-10-22).
+                # The same source item first: by its existing link, then by
+                # its SKU. A published product's name is replaced by the
+                # source's detail-page name, so the fuzzy name match can miss
+                # it and the insert then hit ix_products_sku (Homecenter
+                # failed daily, 2026-10-22).
+                #
+                # A product already linked to this source is a DIFFERENT item
+                # of the source, so it's never a fuzzy match: 28 of 41 fuzzy
+                # matches measured on 2026-10-31 were that, and each one
+                # overwrote the row's real item's price with its own, which
+                # is why stored buy prices drifted from the source.
                 sku = build_sku(source.name, candidate.external_id)
-                product = catalog_by_sku.get(sku)
-                match = find_best_match(candidate.name, catalog) if product is None else None
+                linked_id = product_id_by_external_id.get(candidate.external_id)
+                product = catalog_by_id.get(linked_id) if linked_id else None
+                if product is None:
+                    product = catalog_by_sku.get(sku)
+                match = (
+                    find_best_match(
+                        candidate.name,
+                        catalog,
+                        exclude_ids=set(product_id_by_external_id.values()),
+                    )
+                    if product is None
+                    else None
+                )
 
                 if product is not None:
                     pass
@@ -184,6 +207,7 @@ def run_discovery(
                     db.refresh(product)
                     catalog.append(product)
                     catalog_by_sku[product.sku] = product
+                    catalog_by_id[product.id] = product
                     logger.info("Discovery created new product: %s", product.name)
 
                 source_product = (
@@ -204,6 +228,7 @@ def run_discovery(
                     db.add(source_product)
                     db.commit()
                     db.refresh(source_product)
+                    product_id_by_external_id[candidate.external_id] = product.id
                 else:
                     source_product.current_price = candidate.price
                     source_product.stock_available = candidate.stock_available

@@ -336,3 +336,109 @@ def test_discovery_reuses_a_renamed_product_by_its_sku(
 
     assert db_session.query(Product).filter_by(sku=sku).count() == 1
     assert db_session.query(SourceProduct).one().product_id == renamed.id
+
+
+class _FakeTwoSizesAdapter(_FakeRetailAdapter):
+    """The same TV line, 55" and 65", as two items of one source."""
+
+    def search_products(self, query: str, limit: int = 20) -> list[SourceProductInfo]:
+        return [
+            SourceProductInfo(
+                external_id=external_id,
+                name=name,
+                price=Decimal(price),
+                currency="COP",
+                stock_available=True,
+                url=f"https://example.com/{external_id}",
+                reference_price=Decimal("9000000"),
+            )
+            for external_id, name, price in self.items
+        ]
+
+    items: tuple[tuple[str, str, str], ...] = ()
+
+
+def _discover(db_session: Session, source: Source, items: tuple[tuple[str, str, str], ...]) -> None:
+    adapter = _FakeTwoSizesAdapter()
+    adapter.items = items
+    marketplace = db_session.query(Marketplace).first()
+    assert marketplace is not None
+    run_discovery(db_session, source, adapter, marketplace.id, ["tv"])
+
+
+def _source_and_marketplace(db_session: Session) -> Source:
+    source = Source(name="Fake Retail Source", source_type=SourceType.API)
+    db_session.add_all([source, Marketplace(name="Test Marketplace")])
+    db_session.commit()
+    return source
+
+
+def test_two_items_of_a_source_never_share_a_product_row(
+    db_session: Session, _fixed_rate_settings: Settings
+) -> None:
+    """2026-10-31: another item with a similar name matched the row, kept its
+    external_id and overwrote its price, so the stored buy price drifted."""
+    source = _source_and_marketplace(db_session)
+    _discover(
+        db_session,
+        source,
+        (
+            ("a", "Televisor Marca Smart UHD Negro", "1000000"),
+            ("b", "Televisor Marca Smart UHD Negro Nuevo", "3000000"),
+        ),
+    )
+
+    prices = {sp.external_id: sp.current_price for sp in db_session.query(SourceProduct).all()}
+    assert prices == {"a": Decimal("1000000.00"), "b": Decimal("3000000.00")}
+    assert db_session.query(Product).count() == 2
+
+
+def test_different_numbers_are_not_the_same_product_across_sources(
+    db_session: Session, _fixed_rate_settings: Settings
+) -> None:
+    source = _source_and_marketplace(db_session)
+    other = Source(name="Other Source", source_type=SourceType.API)
+    db_session.add(other)
+    db_session.commit()
+    _discover(db_session, source, (("a", "Televisor Marca 55 Pulgadas UHD", "1000000"),))
+    _discover(db_session, other, (("b", "Televisor Marca 65 Pulgadas UHD", "3000000"),))
+
+    assert db_session.query(Product).count() == 2
+
+
+def test_same_name_still_links_across_sources(
+    db_session: Session, _fixed_rate_settings: Settings
+) -> None:
+    source = _source_and_marketplace(db_session)
+    other = Source(name="Other Source", source_type=SourceType.API)
+    db_session.add(other)
+    db_session.commit()
+    _discover(db_session, source, (("a", "Televisor Marca 55 Pulgadas UHD", "1000000"),))
+    _discover(db_session, other, (("b", "Televisor Marca 55 Pulgadas UHD", "1100000"),))
+
+    assert db_session.query(Product).count() == 1
+    assert db_session.query(SourceProduct).count() == 2
+
+
+def test_an_item_keeps_its_linked_row_after_a_rename(
+    db_session: Session, _fixed_rate_settings: Settings
+) -> None:
+    """The row's SKU is another source's, so only the link finds it."""
+    source = _source_and_marketplace(db_session)
+    product = Product(sku="OTH-1", name="Detail Page Name", active=True)
+    db_session.add(product)
+    db_session.commit()
+    db_session.add(
+        SourceProduct(
+            source_id=source.id,
+            product_id=product.id,
+            external_id="a",
+            current_price=Decimal("1000000"),
+        )
+    )
+    db_session.commit()
+
+    _discover(db_session, source, (("a", "Completely Other Search Name", "1200000"),))
+
+    assert db_session.query(Product).count() == 1
+    assert db_session.query(SourceProduct).one().current_price == Decimal("1200000.00")

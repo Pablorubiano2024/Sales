@@ -11,11 +11,36 @@ smarter implementation later without touching callers.
 from __future__ import annotations
 
 import re
+import unicodedata
+from collections.abc import Collection
 from dataclasses import dataclass
 
 from backend.app.models.product import Product
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
+# Words that make a different product of the same line ("Watch 6" vs "Watch 6 Lite").
+VARIANT_WORDS = {
+    "lite",
+    "pro",
+    "max",
+    "plus",
+    "mini",
+    "ultra",
+    "classic",
+    "se",
+    "fe",
+    "neo",
+    "active",
+}
+
+
+def name_numbers(text: str | None) -> set[str]:
+    return set(re.findall(r"\d+", text or ""))
+
+
+def name_variants(text: str | None) -> set[str]:
+    ascii_text = unicodedata.normalize("NFKD", text or "").encode("ascii", "ignore").decode("ascii")
+    return set(re.findall(r"[a-z]+", ascii_text.lower())) & VARIANT_WORDS
 
 
 def _tokenize(text: str) -> set[str]:
@@ -44,11 +69,21 @@ def find_best_match(
     candidate_name: str,
     catalog: list[Product],
     min_score: float = 0.4,
+    exclude_ids: Collection[str] = (),
 ) -> ProductMatch | None:
     """Return the best-matching catalog Product for a candidate name, or
-    None if nothing clears `min_score`."""
+    None if nothing clears `min_score`. Similar names aren't enough: both
+    must have the same numbers (size/capacity/model) and variant words — a
+    65" TV scored 0.72 against the 55" of the same line and took over its
+    row (2026-10-31). `exclude_ids` are never matched."""
+    numbers = name_numbers(candidate_name)
+    variants = name_variants(candidate_name)
     best: ProductMatch | None = None
     for product in catalog:
+        if product.id in exclude_ids:
+            continue
+        if name_numbers(product.name) != numbers or name_variants(product.name) != variants:
+            continue
         score = similarity(candidate_name, product.name)
         if best is None or score > best.score:
             best = ProductMatch(product=product, score=score)
