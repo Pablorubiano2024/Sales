@@ -4,18 +4,20 @@ test_mercadolibre.py) so these focus on the map-to-internal-Order logic."""
 
 from __future__ import annotations
 
+from datetime import datetime
 from decimal import Decimal
 from unittest.mock import MagicMock
 
 from sqlalchemy.orm import Session
 
 from backend.app.integrations.base import MarketplaceOrderInfo
+from backend.app.jobs import order_sync
 from backend.app.jobs.order_sync import run_order_sync
 from backend.app.models.marketplace import Marketplace, MarketplaceProduct
 from backend.app.models.opportunity import Opportunity, OpportunityStatus
 from backend.app.models.order import Order
 from backend.app.models.product import Product
-from backend.app.models.source import Source, SourceType
+from backend.app.models.source import Source, SourceProduct, SourceType
 
 
 def _make_listing(db: Session, *, external_id: str) -> MarketplaceProduct:
@@ -184,3 +186,56 @@ def test_run_order_sync_records_real_commission_and_shipping(db_session: Session
     assert order.marketplace_fees == Decimal("14400")
     assert order.shipping_cost == Decimal("8500")
     adapter.get_seller_shipping_cost.assert_called_once_with(48320713704)
+
+
+def test_run_order_sync_links_the_origin_source_not_the_latest_look_alike(
+    db_session: Session,
+) -> None:
+    """The alert's buy link comes from this opportunity: a row can also hold
+    another source's similar item, possibly updated more recently."""
+    marketplace = Marketplace(name="Test Marketplace")
+    origin = Source(name="Origin Store", source_type=SourceType.API)
+    other = Source(name="Other Store", source_type=SourceType.API)
+    product = Product(sku="ORI-1", name="Licuadora 10 Velocidades")
+    db_session.add_all([marketplace, origin, other, product])
+    db_session.commit()
+    db_session.add_all(
+        [
+            SourceProduct(
+                source_id=origin.id,
+                product_id=product.id,
+                external_id="1",
+                current_price=Decimal("100000"),
+            ),
+            SourceProduct(
+                source_id=other.id,
+                product_id=product.id,
+                external_id="2",
+                current_price=Decimal("90000"),
+            ),
+        ]
+    )
+    wanted = None
+    for source, updated in ((origin, datetime(2026, 1, 1)), (other, datetime(2026, 6, 1))):
+        opportunity = Opportunity(
+            product_id=product.id,
+            source_id=source.id,
+            marketplace_id=marketplace.id,
+            buy_price=Decimal("100000"),
+            sell_price=Decimal("200000"),
+            status=OpportunityStatus.APPROVED,
+            updated_at=updated,
+        )
+        db_session.add(opportunity)
+        wanted = wanted or opportunity
+    listing = MarketplaceProduct(
+        marketplace_id=marketplace.id,
+        product_id=product.id,
+        external_id="MCOX",
+        selling_price=Decimal("200000"),
+    )
+    db_session.add(listing)
+    db_session.commit()
+
+    assert wanted is not None
+    assert order_sync._resolve_opportunity_id(db_session, listing) == wanted.id

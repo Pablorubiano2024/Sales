@@ -7,8 +7,12 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from decimal import Decimal
 
+from sqlalchemy.orm import Session
+
+from backend.app.models.marketplace import Marketplace
 from backend.app.models.opportunity import Opportunity, OpportunityStatus
-from backend.app.models.source import SourceProduct
+from backend.app.models.product import Product
+from backend.app.models.source import Source, SourceProduct, SourceType
 from backend.app.services.listing_optimizer import (
     _competitor_prices,
     buy_source_blocker,
@@ -16,6 +20,7 @@ from backend.app.services.listing_optimizer import (
     decide_price,
     decide_publish_price,
     find_market_prices,
+    is_origin_opportunity,
     listing_keys,
     minimum_profitable_price,
     reactivation_blocker,
@@ -276,3 +281,34 @@ def test_market_prices_are_unknown_without_a_verified_product() -> None:
     assert find_market_prices(ml, "Licuadora Ninja", "Ninja", "Genérico") is None  # type: ignore[arg-type]
     assert ml.queries == ["Licuadora Ninja"]
     assert ml.priced == []
+
+
+def test_only_the_rows_origin_source_can_publish(db_session: Session) -> None:
+    origin = Source(name="Origin Store", source_type=SourceType.API)
+    other = Source(name="Other Store", source_type=SourceType.API)
+    marketplace = Marketplace(name="Test Marketplace")
+    product = Product(sku="ORI-1", name="Licuadora")
+    db_session.add_all([origin, other, marketplace, product])
+    db_session.commit()
+    opportunities = {}
+    for source, external_id in ((origin, "1"), (other, "2")):
+        db_session.add(
+            SourceProduct(
+                source_id=source.id,
+                product_id=product.id,
+                external_id=external_id,
+                current_price=D("100000"),
+            )
+        )
+        opportunities[source.name] = Opportunity(
+            product_id=product.id,
+            source_id=source.id,
+            marketplace_id=marketplace.id,
+            buy_price=D("100000"),
+            sell_price=D("200000"),
+        )
+        db_session.add(opportunities[source.name])
+    db_session.commit()
+
+    assert is_origin_opportunity(db_session, opportunities["Origin Store"])
+    assert not is_origin_opportunity(db_session, opportunities["Other Store"])

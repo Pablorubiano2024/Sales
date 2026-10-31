@@ -13,6 +13,8 @@ For each APPROVED opportunity, in order:
   1. Skip if already published (an active/paused MarketplaceProduct row
      for this product+marketplace already exists) — republishing isn't
      needed, the sync job keeps it current.
+     Also skip an opportunity from any source but the product's origin
+     (listing_optimizer.is_origin_opportunity).
   2. Skip if a human already rejected this opportunity's draft in the
      Streamlit Autopilot view — the only real human override; never
      auto-regenerated/republished over.
@@ -89,6 +91,7 @@ from backend.app.services.listing_optimizer import (  # noqa: E402
     decide_publish_price,
     find_market_prices,
     is_launch_mode,
+    is_origin_opportunity,
     minimum_profitable_price,
 )
 from backend.app.services.opportunity_validator import validate_opportunity  # noqa: E402
@@ -174,6 +177,11 @@ def main() -> None:
                     ListingStatus.PAUSED,
                 ):
                     print(f"SKIP  {label}: ya publicado (external_id={existing.external_id})")
+                    skipped += 1
+                    continue
+
+                if not is_origin_opportunity(db, opp):
+                    print(f"SKIP  {label}: no es la fuente de origen de este producto")
                     skipped += 1
                     continue
 

@@ -345,6 +345,22 @@ def origin_source(
     return None, None
 
 
+def is_origin_opportunity(db: Session, opportunity: Opportunity) -> bool:
+    """Is this the source the product row is ours from? A row can also hold
+    other sources' items that only looked similar, so publishing from one of
+    them lists a product the row's buy source doesn't sell (2026-10-31: the
+    Imusa 10-speed from Alkosto on the row of Ktronix's 12-speed)."""
+    source = db.get(Source, opportunity.source_id)
+    source_product = (
+        db.query(SourceProduct)
+        .filter_by(source_id=opportunity.source_id, product_id=opportunity.product_id)
+        .first()
+    )
+    if source is None or source_product is None or not source_product.external_id:
+        return False
+    return build_sku(source.name, source_product.external_id) == opportunity.product.sku
+
+
 def find_market_prices(
     ml: MercadoLibreAdapter, title: str, brand: str, model: str
 ) -> list[Decimal] | None:

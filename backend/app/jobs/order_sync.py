@@ -18,23 +18,25 @@ from backend.app.integrations.mercadolibre import MercadoLibreAdapter
 from backend.app.models.marketplace import MarketplaceProduct
 from backend.app.models.opportunity import Opportunity
 from backend.app.models.order import Order
+from backend.app.services.listing_optimizer import origin_source
 from backend.app.services.order_router import create_order_from_sale
 
 logger = get_logger(__name__)
 
 
-def _resolve_opportunity_id(db: Session, product_id: str) -> str | None:
-    """Best real Opportunity for this Product — the most recently updated
-    one, since a product can have more than one Opportunity row (across
-    sources). A heuristic, documented rather than hidden: good enough to
-    attribute analytics to *a* real opportunity for this product without
-    inventing a stronger link this schema doesn't actually have."""
-    opportunity = (
-        db.query(Opportunity)
-        .filter_by(product_id=product_id)
-        .order_by(Opportunity.updated_at.desc())
-        .first()
-    )
+def _resolve_opportunity_id(db: Session, listing: MarketplaceProduct) -> str | None:
+    """The listing's origin source: its alert shows that store's link to buy
+    from. A product row can hold other sources' look-alike items (Wurden
+    fryer <- a Tezzio 4L), so only without an origin does this fall back to
+    the most recently updated Opportunity, for analytics attribution."""
+    opportunity, _ = origin_source(db, listing)
+    if opportunity is None:
+        opportunity = (
+            db.query(Opportunity)
+            .filter_by(product_id=listing.product_id)
+            .order_by(Opportunity.updated_at.desc())
+            .first()
+        )
     return opportunity.id if opportunity is not None else None
 
 
@@ -95,7 +97,7 @@ def run_order_sync(db: Session, adapter: MercadoLibreAdapter, since: str | None 
             marketplace_fees=fees,
             shipping_cost=shipping,
             marketplace_order_id=order_info.external_id,
-            opportunity_id=_resolve_opportunity_id(db, listing.product_id),
+            opportunity_id=_resolve_opportunity_id(db, listing),
         )
         created += 1
         logger.info(
