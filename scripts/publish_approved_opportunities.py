@@ -24,9 +24,11 @@ For each APPROVED opportunity, in order:
      real brand/model/spec-attribute mapping, and the real category-
      specific "Clásica" (gold_special) sale commission, all in that one
      module (not duplicated here).
-  5. Recompute the opportunity against that real commission — skip if
-     it's no longer actually profitable under the real fee, not the flat
-     estimate discovery used.
+  5. Price it from real competitors (listing_optimizer.decide_publish_price)
+     — skip if the catalog has no verifiably identical product with other
+     sellers, or they're below our cheapest profitable price. Then recompute
+     the opportunity at that price with the real commission — skip if it's
+     no longer actually profitable.
   6. Run the Opportunity Validator (Phase 1) against the real stock/price
      already fetched in step 3.
   7. Publish via listing_service.publish_and_record(), using the draft's
@@ -57,6 +59,7 @@ from __future__ import annotations
 import sys
 import time
 from decimal import Decimal
+from functools import partial
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -65,6 +68,7 @@ import json  # noqa: E402
 
 import httpx  # noqa: E402
 
+from backend.app.core.config import get_settings  # noqa: E402
 from backend.app.core.database import SessionLocal, init_db  # noqa: E402
 from backend.app.core.logging import get_logger  # noqa: E402
 from backend.app.integrations.mercadolibre import MercadoLibreAdapter  # noqa: E402
@@ -80,6 +84,12 @@ from backend.app.services.listing_draft_service import (  # noqa: E402
     DraftGenerationError,
     fetch_live_source_data,
     generate_draft,
+)
+from backend.app.services.listing_optimizer import (  # noqa: E402
+    decide_publish_price,
+    find_market_prices,
+    is_launch_mode,
+    minimum_profitable_price,
 )
 from backend.app.services.opportunity_validator import validate_opportunity  # noqa: E402
 
@@ -100,9 +110,32 @@ RATE_LIMIT_BACKOFF_SECONDS = 30
 MAX_RATE_LIMIT_RETRIES = 3
 
 
+def _fee_for(
+    category_id: str,
+    price: Decimal,
+    *,
+    client: httpx.Client,
+    access_token: str,
+    default_pct: Decimal,
+) -> Decimal:
+    pct = category_lookup.get_sale_commission_pct(
+        category_id,
+        price,
+        client=client,
+        access_token=access_token,
+        listing_type_id=LISTING_TYPE_ID,
+    )
+    return price * (pct if pct is not None else default_pct)
+
+
+def _fixed_cost(cost: Decimal, _price: Decimal) -> Decimal:
+    return cost
+
+
 def main() -> None:
     confirm = "--confirm" in sys.argv[1:]
     init_db()
+    settings = get_settings()
     db = SessionLocal()
     published, skipped = 0, 0
     try:
@@ -129,6 +162,7 @@ def main() -> None:
             if not ml_adapter.authenticate() or ml_adapter._access_token is None:  # noqa: SLF001
                 sys.exit("No hay una cuenta de MercadoLibre conectada/válida.")
             access_token: str = ml_adapter._access_token  # noqa: SLF001
+            launch_mode = is_launch_mode(ml_adapter)
 
             for opp in opportunities:
                 product = opp.product
@@ -184,45 +218,59 @@ def main() -> None:
 
                 # The real "Clásica" commission is category-specific (16.5%
                 # for Freidoras vs 12.0% for Relojes, confirmed live
-                # 2026-09-25) — recompute against it now rather than trust
-                # discovery's flat Settings.marketplace_commission_pct
-                # estimate, and skip if it's no longer actually profitable
-                # under the real fee. evaluate_opportunity upserts the same
-                # Opportunity row, so this also corrects it going forward.
-                real_commission_pct = attrs.get("commission_pct")
-                if real_commission_pct is not None:
-                    real_fee = (opp.sell_price * Decimal(str(real_commission_pct))).quantize(
-                        Decimal("0.01")
+                # 2026-09-25), so it prices the floor below, and
+                # evaluate_opportunity (an upsert) corrects the row with it.
+                fee_for = partial(
+                    _fee_for,
+                    draft.category_id,
+                    client=ml_public_client,
+                    access_token=access_token,
+                    default_pct=settings.marketplace_commission_pct,
+                )
+                # No item exists yet to ask MercadoLibre its real shipping
+                # cost; the daily optimizer corrects the price with it.
+                floor = minimum_profitable_price(
+                    Decimal(opp.buy_price),
+                    Decimal(opp.tax_cost) + Decimal(opp.payment_cost) + Decimal(opp.other_cost),
+                    fee_for,
+                    partial(_fixed_cost, Decimal(opp.shipping_cost)),
+                    settings.min_roi,
+                    settings.min_net_profit,
+                )
+                decision = decide_publish_price(
+                    floor,
+                    find_market_prices(
+                        ml_adapter, draft.title, attrs.get("brand", ""), attrs.get("model", "")
+                    ),
+                    launch_mode=launch_mode,
+                )
+                if decision.price is None:
+                    print(f"SKIP  {label}: {decision.reason}")
+                    skipped += 1
+                    continue
+
+                opp = evaluate_opportunity(
+                    db,
+                    OpportunityCreate(
+                        product_id=product.id,
+                        source_id=opp.source_id,
+                        marketplace_id=marketplace.id,
+                        buy_price=float(opp.buy_price),
+                        sell_price=float(decision.price),
+                        marketplace_fee=float(fee_for(decision.price).quantize(Decimal("0.01"))),
+                        shipping_cost=float(opp.shipping_cost),
+                        tax_cost=float(opp.tax_cost),
+                        payment_cost=float(opp.payment_cost),
+                        other_cost=float(opp.other_cost),
+                    ),
+                )
+                if opp.status not in (OpportunityStatus.APPROVED, OpportunityStatus.PROMISING):
+                    print(
+                        f"SKIP  {label}: a {decision.price:,.0f} ya no es rentable "
+                        f"(status={opp.status.value})"
                     )
-                    opp = evaluate_opportunity(
-                        db,
-                        OpportunityCreate(
-                            product_id=product.id,
-                            source_id=opp.source_id,
-                            marketplace_id=marketplace.id,
-                            buy_price=float(opp.buy_price),
-                            sell_price=float(opp.sell_price),
-                            marketplace_fee=float(real_fee),
-                            shipping_cost=float(opp.shipping_cost),
-                            tax_cost=float(opp.tax_cost),
-                            payment_cost=float(opp.payment_cost),
-                            other_cost=float(opp.other_cost),
-                        ),
-                    )
-                    if opp.status not in (OpportunityStatus.APPROVED, OpportunityStatus.PROMISING):
-                        print(
-                            f"SKIP  {label}: con comisión real de {LISTING_TYPE_ID} "
-                            f"({float(real_commission_pct):.1%}) ya no es rentable "
-                            f"(status={opp.status.value})"
-                        )
-                        skipped += 1
-                        continue
-                else:
-                    logger.warning(
-                        "No se pudo obtener la comisión real para categoría=%s; "
-                        "usando el estimado de Settings.marketplace_commission_pct",
-                        draft.category_id,
-                    )
+                    skipped += 1
+                    continue
 
                 # Autopilot Phase 1 gate — margin/score/seller_count/stock
                 # rules the user asked for, on top of the checks above

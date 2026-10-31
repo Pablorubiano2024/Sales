@@ -14,6 +14,8 @@ from backend.app.services.listing_optimizer import (
     buy_source_blocker,
     catalog_matches,
     decide_price,
+    decide_publish_price,
+    find_market_prices,
     listing_keys,
     minimum_profitable_price,
     reactivation_blocker,
@@ -217,3 +219,60 @@ def test_forewarned_item_matches_shorter_catalog_name():
     assert catalog_matches(forewarned, catalog)
     lite = {**forewarned, "title": "Xiaomi Redmi Watch 6 Lite Amoled 1.96"}
     assert not catalog_matches(lite, catalog)
+
+
+def test_publish_price_needs_real_competitors() -> None:
+    for prices in (None, []):
+        decision = decide_publish_price(D("400000"), prices, launch_mode=False)
+        assert decision.action == "skip"
+        assert decision.price is None
+
+
+def test_publish_price_skips_when_competitor_is_below_the_floor() -> None:
+    decision = decide_publish_price(D("790900"), [D("665000")], launch_mode=True)
+    assert decision.action == "skip"
+    assert "665,000" in decision.reason
+
+
+def test_publish_price_undercuts_the_cheapest_competitor() -> None:
+    decision = decide_publish_price(D("400000"), [D("789900"), D("800000")], launch_mode=False)
+    assert decision.price == D("781900")
+
+
+def test_publish_price_in_launch_mode_is_the_floor() -> None:
+    decision = decide_publish_price(D("481900"), [D("789900")], launch_mode=True)
+    assert decision.price == D("481900")
+
+
+class _SearchML:
+    def __init__(self, results: dict[str, list[dict]]) -> None:
+        self.results = results
+        self.queries: list[str] = []
+        self.priced: list[str] = []
+
+    def search_catalog_products(self, query: str) -> list[dict]:
+        self.queries.append(query)
+        return self.results.get(query, [])
+
+    def get_catalog_competitor_prices(self, catalog_id: str) -> list[Decimal]:
+        self.priced.append(catalog_id)
+        return [D("500000")]
+
+
+def test_market_prices_ignore_a_different_product_and_use_the_exact_one() -> None:
+    wrong = {**_catalog("Repuesto Aspas Licuadora", "Otra", "X1"), "id": "WRONG"}
+    right = {**_catalog("Licuadora Ninja", "Ninja", "TB400LA"), "id": "RIGHT"}
+    ml = _SearchML({"Ninja TB400LA": [wrong, right]})
+
+    prices = find_market_prices(ml, "Licuadora Ninja Sistema", "Ninja", "TB400LA")  # type: ignore[arg-type]
+
+    assert prices == [D("500000")]
+    assert ml.priced == ["RIGHT"]
+
+
+def test_market_prices_are_unknown_without_a_verified_product() -> None:
+    ml = _SearchML({"Licuadora Ninja": [{**_catalog("Otra Cosa", "Otra", "X1"), "id": "X"}]})
+
+    assert find_market_prices(ml, "Licuadora Ninja", "Ninja", "Genérico") is None  # type: ignore[arg-type]
+    assert ml.queries == ["Licuadora Ninja"]
+    assert ml.priced == []

@@ -456,6 +456,21 @@ class MercadoLibreAdapter(MarketplaceAdapter):
         data: dict[str, Any] = response.json()
         return data
 
+    def search_catalog_products(self, query: str) -> list[dict[str, Any]]:
+        """GET /products/search results for free text, ML-ranked. Not trusted
+        as a match on their own (see listing_optimizer.catalog_matches);
+        [] on failure."""
+        response = self._client.get(
+            "/products/search",
+            headers=self._auth_headers(),
+            params={"site_id": "MCO", "status": "active", "q": query},
+        )
+        if response.status_code != 200:
+            logger.warning("products/search(%r) failed: %s", query, response.text)
+            return []
+        results: list[dict[str, Any]] = response.json().get("results") or []
+        return results
+
     def get_catalog_competitor_prices(self, catalog_product_id: str) -> list[Decimal] | None:
         """Prices of OTHER sellers' active items in this catalog product
         (GET /products/{id}/items), ours excluded. [] when the catalog has

@@ -106,6 +106,7 @@ TARGET_LISTING_TYPE = "gold_special"
 CATALOG_UNDERCUT = Decimal("0.01")
 MAX_FLOOR_ITERATIONS = 8
 LAUNCH_MODE_MAX_SALES = 5
+GENERIC_MODEL = "Genérico"
 # Words that make a different product of the same line ("Watch 6" vs "Watch 6 Lite").
 VARIANT_WORDS = {
     "lite",
@@ -167,7 +168,7 @@ def minimum_profitable_price(
 
 @dataclass
 class PriceDecision:
-    action: str  # "price" or "pause"
+    action: str  # "price", "pause" or (decide_publish_price) "skip"
     price: Decimal | None
     reason: str
 
@@ -371,6 +372,43 @@ def origin_source(
             )
             return opportunity, source_product
     return None, None
+
+
+def find_market_prices(
+    ml: MercadoLibreAdapter, title: str, brand: str, model: str
+) -> list[Decimal] | None:
+    """Other sellers' real prices for this exact product, before it's
+    published: the first catalog product that passes `catalog_matches`,
+    searched by brand + model, then by full name. None when no catalog
+    product is verifiably the same; [] when it has no other sellers."""
+    has_model = model != GENERIC_MODEL
+    item = {
+        "title": title,
+        "attributes": [
+            {"id": "BRAND", "value_name": brand},
+            *([{"id": "MODEL", "value_name": model}] if has_model else []),
+        ],
+    }
+    queries = [f"{brand} {model}", title] if has_model else [title]
+    for query in queries:
+        for catalog_product in ml.search_catalog_products(query):
+            if catalog_matches(item, catalog_product):
+                return ml.get_catalog_competitor_prices(catalog_product["id"])
+    return None
+
+
+def decide_publish_price(
+    floor: Decimal, competitor_prices: list[Decimal] | None, *, launch_mode: bool
+) -> PriceDecision:
+    """Publish only at a price backed by real competitors: the listing's
+    first price used to be the source's list price or a 1.8x estimate
+    (2026-10-31: a TV bought at 4.1M would have gone up at 15M; the Hamilton
+    Beach coffee maker went up at 790,900 and was paused against a 665,000
+    competitor). Same pricing as a live listing; action "skip" = no publish."""
+    if not competitor_prices:
+        return PriceDecision("skip", None, "sin precio real de competidores")
+    decision = decide_price(floor, floor, competitor_prices, launch_mode=launch_mode)
+    return decision if decision.action == "price" else PriceDecision("skip", None, decision.reason)
 
 
 def _competitor_prices(ml: MercadoLibreAdapter, catalog_ids: set[str]) -> list[Decimal] | None:
