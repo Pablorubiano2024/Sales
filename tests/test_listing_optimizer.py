@@ -14,9 +14,12 @@ from backend.app.models.opportunity import Opportunity, OpportunityStatus
 from backend.app.models.product import Product
 from backend.app.models.source import Source, SourceProduct, SourceType
 from backend.app.services.listing_optimizer import (
+    PriceDecision,
     _competitor_prices,
+    awaits_catalog_opt_in,
     buy_source_blocker,
     catalog_matches,
+    catalog_rescue_blocker,
     decide_price,
     decide_publish_price,
     find_market_prices,
@@ -312,3 +315,20 @@ def test_only_the_rows_origin_source_can_publish(db_session: Session) -> None:
 
     assert is_origin_opportunity(db_session, opportunities["Origin Store"])
     assert not is_origin_opportunity(db_session, opportunities["Other Store"])
+
+
+def test_only_a_forewarned_item_under_review_awaits_the_catalog() -> None:
+    forewarned = ["catalog_forewarning"]
+    assert awaits_catalog_opt_in({"status": "under_review", "tags": forewarned})
+    assert not awaits_catalog_opt_in({"status": "under_review", "tags": []})
+    assert not awaits_catalog_opt_in({"status": "active", "tags": forewarned})
+
+
+def test_catalog_rescue_needs_a_competitive_profitable_verified_product() -> None:
+    price = PriceDecision("price", D("600900"), "")
+    pause = PriceDecision("pause", None, "competidor")
+    floor = D("600900")
+    assert catalog_rescue_blocker(price, floor, floor, can_opt_in=True) is None
+    assert catalog_rescue_blocker(pause, floor, floor, can_opt_in=True)
+    assert catalog_rescue_blocker(price, floor - 1, floor, can_opt_in=True)
+    assert catalog_rescue_blocker(price, floor, floor, can_opt_in=False)

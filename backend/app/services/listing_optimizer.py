@@ -43,7 +43,10 @@ opt-ins — except for an item tagged `catalog_forewarning`: MercadoLibre
 pauses those unless they join the catalog (emailed "avisos próximos a
 pausarse", 2026-10-21, both Xiaomi Redmi Watch 6), so opting in at the
 same ROI-cleared price beats losing the listing. Switches back to normal
-mode on its own after those first sales.
+mode on its own after those first sales. A forewarned item reactivated
+without opting in goes straight to `under_review` until it does
+(2026-11-01, Redmi Watch 6), and the opt-in brings it back
+(`awaits_catalog_opt_in`).
 
 HANDLING TIME — every listing gets MercadoLibre's "tiempo de disponibilidad"
 (mercadolibre.HANDLING_TIME), whatever else is skipped below: the source
@@ -345,6 +348,27 @@ def origin_source(
     return None, None
 
 
+def awaits_catalog_opt_in(item: dict) -> bool:
+    """Inactive until it joins the catalog, not for anything we can fix on
+    the item itself."""
+    return item.get("status") == "under_review" and "catalog_forewarning" in (
+        item.get("tags") or []
+    )
+
+
+def catalog_rescue_blocker(
+    decision: PriceDecision, current: Decimal, floor: Decimal, *, can_opt_in: bool
+) -> str | None:
+    """It opts in at its current price; only the next run can change that."""
+    if decision.action == "pause":
+        return decision.reason
+    if current < floor:
+        return f"precio actual {current:,.0f} < precio mínimo rentable {floor:,.0f}"
+    if not can_opt_in:
+        return "no se pudo verificar que el catálogo sugerido sea el mismo producto"
+    return None
+
+
 def is_origin_opportunity(db: Session, opportunity: Opportunity) -> bool:
     """Is this the source the product row is ours from? A row can also hold
     other sources' items that only looked similar, so publishing from one of
@@ -413,6 +437,29 @@ def _competitor_prices(ml: MercadoLibreAdapter, catalog_ids: set[str]) -> list[D
     return sorted(prices)
 
 
+def _opt_in(
+    db: Session,
+    ml: MercadoLibreAdapter,
+    listing: MarketplaceProduct,
+    catalog_product_id: str,
+    price: Decimal,
+) -> None:
+    assert listing.external_id is not None
+    created = ml.opt_in_catalog(listing.external_id, catalog_product_id)
+    db.add(
+        MarketplaceProduct(
+            marketplace_id=listing.marketplace_id,
+            product_id=listing.product_id,
+            external_id=created["id"],
+            url=created.get("permalink"),
+            selling_price=Decimal(str(created.get("price", price))),
+            currency=listing.currency,
+            status=ListingStatus.ACTIVE,
+        )
+    )
+    db.commit()
+
+
 def optimize_listing(
     db: Session,
     ml: MercadoLibreAdapter,
@@ -434,7 +481,8 @@ def optimize_listing(
         return OptimizationResult(listing.external_id, "?", skipped="no existe en MercadoLibre")
     item = info.raw
     result = OptimizationResult(listing.external_id, item.get("title", "")[:50])
-    if item.get("status") not in ("active", "paused"):
+    awaiting_catalog = awaits_catalog_opt_in(item)
+    if item.get("status") not in ("active", "paused") and not awaiting_catalog:
         result.skipped = f"estado real '{item.get('status')}'"
         return result
     is_paused = item["status"] == "paused"
@@ -511,6 +559,20 @@ def optimize_listing(
         return result
     current = Decimal(str(item["price"]))
     decision = decide_price(floor, current, competitors, launch_mode=launch_mode)
+    can_opt_in = bool(catalog_product_id and same_product) and should_opt_in_catalog(
+        item, launch_mode=launch_mode
+    )
+
+    if awaiting_catalog:
+        blocker = catalog_rescue_blocker(decision, current, floor, can_opt_in=can_opt_in)
+        if blocker:
+            result.skipped = f"en revisión, espera catálogo: {blocker}"
+            return result
+        assert catalog_product_id is not None
+        result.actions.append(f"inscribir en catálogo {catalog_product_id} a {current:,.0f}")
+        if apply:
+            _opt_in(db, ml, listing, catalog_product_id, current)
+        return result
 
     if decision.action == "pause":
         if is_paused:
@@ -562,20 +624,9 @@ def optimize_listing(
         # Catalog opt-in waits for a run where it's already active.
         return result
 
-    if catalog_product_id and same_product and should_opt_in_catalog(item, launch_mode=launch_mode):
+    if can_opt_in:
+        assert catalog_product_id is not None
         result.actions.append(f"inscribir en catálogo {catalog_product_id}")
         if apply:
-            created = ml.opt_in_catalog(listing.external_id, catalog_product_id)
-            db.add(
-                MarketplaceProduct(
-                    marketplace_id=listing.marketplace_id,
-                    product_id=listing.product_id,
-                    external_id=created["id"],
-                    url=created.get("permalink"),
-                    selling_price=Decimal(str(created.get("price", new_price))),
-                    currency=listing.currency,
-                    status=ListingStatus.ACTIVE,
-                )
-            )
-            db.commit()
+            _opt_in(db, ml, listing, catalog_product_id, new_price)
     return result
