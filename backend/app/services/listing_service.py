@@ -109,13 +109,15 @@ def repair_stuck_pictures(
     days). After a first re-send it can drop picture_download_pending and
     keep only waiting_for_patch — the Electrolux Pure i9 sat like that for
     2 days until its photos were sent again (2026-10-23) — so
-    waiting_for_patch alone is the signal. Re-sends the source's current
-    photos; True if it did."""
+    waiting_for_patch alone is the signal, except on a `catalog_forewarning`
+    item: there it's waiting for a catalog decision, not photos (2026-11-01).
+    Re-sends the source's current photos; True if it did."""
     if record.external_id is None or not image_urls:
         return False
     listing = adapter.get_listing(record.external_id)
     sub_status = set((listing.raw or {}).get("sub_status") or []) if listing else set()
-    if WAITING_FOR_PATCH not in sub_status:
+    tags = (listing.raw or {}).get("tags") or [] if listing else []
+    if WAITING_FOR_PATCH not in sub_status or "catalog_forewarning" in tags:
         return False
     try:
         adapter.update_listing(record.external_id, pictures=[{"source": u} for u in image_urls])

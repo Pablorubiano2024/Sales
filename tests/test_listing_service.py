@@ -228,3 +228,19 @@ def test_repair_stuck_pictures_only_resends_when_ml_waits_for_them(
     assert listing_service.repair_stuck_pictures(adapter, record, ["https://x/1.jpg"]) is resent
     expected = [{"external_id": "MCO999", "pictures": [{"source": "https://x/1.jpg"}]}]
     assert adapter.update_calls == (expected if resent else [])
+
+
+def test_repair_stuck_pictures_ignores_a_listing_waiting_for_a_catalog_decision() -> None:
+    adapter = _StubAdapter()
+    adapter.get_listing_result = MarketplaceListingInfo(
+        external_id="MCO999",
+        title="Test Widget",
+        price=Decimal("50000"),
+        currency="COP",
+        status="under_review",
+        raw={"sub_status": ["waiting_for_patch"], "tags": ["catalog_forewarning"]},
+    )
+    record = MarketplaceProduct(external_id="MCO999", selling_price=Decimal("0"))
+
+    assert listing_service.repair_stuck_pictures(adapter, record, ["https://x/1.jpg"]) is False
+    assert adapter.update_calls == []
