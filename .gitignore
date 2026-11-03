@@ -22,3 +22,4 @@ data/*.sqlite3
 
 # Streamlit
 .streamlit/secrets.toml
+data/videos/
