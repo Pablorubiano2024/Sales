@@ -30,7 +30,9 @@ call (the diagnostic endpoint can't tell us that); the next real
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 import httpx
 from sqlalchemy.orm import Session
@@ -129,6 +131,22 @@ def fetch_live_source_data(
     return live
 
 
+def catalog_attributes(catalog_product: dict[str, Any], attribute_ids: list[str]) -> list[dict]:
+    """The catalog product's own values for `attribute_ids`, in the shape
+    an item's `attributes` takes. Ids it has no value for are left out."""
+    wanted = set(attribute_ids)
+    copied = []
+    for attr in catalog_product.get("attributes") or []:
+        if attr.get("id") not in wanted or not attr.get("value_name"):
+            continue
+        value: dict[str, Any] = {"id": attr["id"], "value_name": attr["value_name"]}
+        if attr.get("value_id"):
+            value["value_id"] = attr["value_id"]
+        copied.append(value)
+        wanted.discard(attr["id"])
+    return copied
+
+
 def generate_draft(
     db: Session,
     opportunity: Opportunity,
@@ -137,6 +155,7 @@ def generate_draft(
     ml_public_client: httpx.Client,
     access_token: str | None = None,
     listing_type_id: str = "gold_special",
+    catalog_product_finder: Callable[[str, str, str], dict[str, Any] | None] | None = None,
 ) -> ListingDraft | DraftGenerationError:
     """Build (or refresh) a ListingDraft from the real Product and the
     live source data already fetched by the caller (same `live` shape
@@ -210,9 +229,24 @@ def generate_draft(
             extra_attributes = [*extra_attributes, {"id": "GTIN", "value_name": live.external_id}]
             covered_attribute_ids = covered_attribute_ids | {"GTIN"}
 
-    if not set(required_now) <= (category_lookup.SAFE_ATTRIBUTE_IDS | covered_attribute_ids):
+    missing = sorted(
+        set(required_now) - (category_lookup.SAFE_ATTRIBUTE_IDS | covered_attribute_ids)
+    )
+    # Still missing: copy them from MercadoLibre's own catalog product, but
+    # only one verified to be this exact item (`catalog_product_finder` =
+    # listing_optimizer.find_identical_catalog_product, the same match that
+    # prices the listing) — never from a merely similar product.
+    if missing and catalog_product_finder is not None:
+        catalog_product = catalog_product_finder(title, brand, model)
+        if catalog_product is not None:
+            copied = catalog_attributes(catalog_product, missing)
+            extra_attributes = [*extra_attributes, *copied]
+            covered_attribute_ids = covered_attribute_ids | {a["id"] for a in copied}
+            missing = [a for a in missing if a not in covered_attribute_ids]
+    if missing:
         return DraftGenerationError(
-            f"Categoría {category_id} requiere atributos que no podemos completar automáticamente"
+            f"Categoría {category_id} requiere atributos que no podemos completar "
+            f"automáticamente: {', '.join(missing)}"
         )
 
     specs = live.specifications[:MAX_DESCRIPTION_SPECS]

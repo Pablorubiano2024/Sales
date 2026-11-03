@@ -385,13 +385,12 @@ def is_origin_opportunity(db: Session, opportunity: Opportunity) -> bool:
     return build_sku(source.name, source_product.external_id) == opportunity.product.sku
 
 
-def find_market_prices(
+def find_identical_catalog_product(
     ml: MercadoLibreAdapter, title: str, brand: str, model: str
-) -> list[Decimal] | None:
-    """Other sellers' real prices for this exact product, before it's
-    published: the first catalog product that passes `catalog_matches`,
-    searched by brand + model, then by full name. None when no catalog
-    product is verifiably the same; [] when it has no other sellers."""
+) -> dict | None:
+    """The first catalog product that passes `catalog_matches` for this
+    not-yet-published product, searched by brand + model, then by full
+    name. None when none is verifiably the same."""
     has_model = model != GENERIC_MODEL
     item = {
         "title": title,
@@ -404,8 +403,30 @@ def find_market_prices(
     for query in queries:
         for catalog_product in ml.search_catalog_products(query):
             if catalog_matches(item, catalog_product):
-                return ml.get_catalog_competitor_prices(catalog_product["id"])
+                return catalog_product
     return None
+
+
+def find_market_prices(
+    ml: MercadoLibreAdapter,
+    title: str,
+    brand: str,
+    model: str,
+    *,
+    finder: Callable[[str, str, str], dict | None] | None = None,
+) -> list[Decimal] | None:
+    """Other sellers' real prices for this exact product, before it's
+    published (see `find_identical_catalog_product`; `finder` lets a caller
+    reuse one it already looked up). None when no catalog product is
+    verifiably the same; [] when it has no other sellers."""
+    catalog_product = (
+        finder(title, brand, model)
+        if finder is not None
+        else find_identical_catalog_product(ml, title, brand, model)
+    )
+    if catalog_product is None:
+        return None
+    return ml.get_catalog_competitor_prices(catalog_product["id"])
 
 
 def decide_publish_price(

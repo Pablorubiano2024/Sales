@@ -61,7 +61,7 @@ from __future__ import annotations
 import sys
 import time
 from decimal import Decimal
-from functools import partial
+from functools import cache, partial
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -89,6 +89,7 @@ from backend.app.services.listing_draft_service import (  # noqa: E402
 )
 from backend.app.services.listing_optimizer import (  # noqa: E402
     decide_publish_price,
+    find_identical_catalog_product,
     find_market_prices,
     is_launch_mode,
     is_origin_opportunity,
@@ -166,6 +167,9 @@ def main() -> None:
                 sys.exit("No hay una cuenta de MercadoLibre conectada/válida.")
             access_token: str = ml_adapter._access_token  # noqa: SLF001
             launch_mode = is_launch_mode(ml_adapter)
+            # One catalog search per product: it fills missing attributes
+            # (generate_draft) and prices the listing (find_market_prices).
+            find_catalog = cache(partial(find_identical_catalog_product, ml_adapter))
 
             for opp in opportunities:
                 product = opp.product
@@ -216,6 +220,7 @@ def main() -> None:
                     ml_public_client=ml_public_client,
                     access_token=access_token,
                     listing_type_id=LISTING_TYPE_ID,
+                    catalog_product_finder=find_catalog,
                 )
                 if isinstance(draft_or_error, DraftGenerationError):
                     print(f"SKIP  {label}: {draft_or_error.reason}")
@@ -248,7 +253,11 @@ def main() -> None:
                 decision = decide_publish_price(
                     floor,
                     find_market_prices(
-                        ml_adapter, draft.title, attrs.get("brand", ""), attrs.get("model", "")
+                        ml_adapter,
+                        draft.title,
+                        attrs.get("brand", ""),
+                        attrs.get("model", ""),
+                        finder=find_catalog,
                     ),
                     launch_mode=launch_mode,
                 )

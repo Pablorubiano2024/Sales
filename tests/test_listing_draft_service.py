@@ -20,6 +20,7 @@ from backend.app.services import category_lookup
 from backend.app.services.listing_draft_service import (
     DraftGenerationError,
     approve_draft,
+    catalog_attributes,
     extract_model,
     generate_draft,
     reject_draft,
@@ -475,3 +476,88 @@ def test_generate_draft_regenerating_a_rejected_draft_resets_status(db_session: 
     assert isinstance(regenerated, ListingDraft)
     assert regenerated.status == ListingDraftStatus.DRAFT
     assert regenerated.rejection_reason is None
+
+
+def _handler_needs(*attribute_ids: str):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/sites/MCO/domain_discovery/search":
+            return httpx.Response(200, json=[{"category_id": "MCO1", "category_name": "X"}])
+        if request.url.path == "/categories/MCO1/attributes":
+            return httpx.Response(
+                200,
+                json=[
+                    {"id": "BRAND", "tags": {"required": True}},
+                    *({"id": a, "tags": {"required": True}} for a in attribute_ids),
+                ],
+            )
+        raise AssertionError(f"unexpected request: {request.url}")
+
+    return handler
+
+
+def test_catalog_attributes_copies_only_the_wanted_values() -> None:
+    catalog_product = {
+        "attributes": [
+            {"id": "VOLTAGE", "value_id": "198815", "value_name": "110V"},
+            {"id": "COLOR", "value_id": None, "value_name": None},
+            {"id": "WEIGHT", "value_name": "3 kg"},
+        ]
+    }
+
+    assert catalog_attributes(catalog_product, ["VOLTAGE", "COLOR"]) == [
+        {"id": "VOLTAGE", "value_name": "110V", "value_id": "198815"}
+    ]
+
+
+def test_generate_draft_fills_missing_attributes_from_the_identical_catalog_product(
+    db_session: Session,
+) -> None:
+    opportunity = _make_opportunity(db_session)
+    asked: list[tuple[str, str, str]] = []
+
+    def finder(title: str, brand: str, model: str) -> dict:
+        asked.append((title, brand, model))
+        return {"attributes": [{"id": "VOLTAGE", "value_id": "1", "value_name": "110V"}]}
+
+    with _client(_handler_needs("VOLTAGE")) as ml_public_client:
+        result = generate_draft(
+            db_session,
+            opportunity,
+            _live(),
+            ml_public_client=ml_public_client,
+            catalog_product_finder=finder,
+        )
+
+    assert isinstance(result, ListingDraft)
+    assert asked == [(truncate_title(_live().name), "Holstein", "HOL-AF9")]
+    extra = json.loads(result.attributes or "{}")["extra"]
+    assert {"id": "VOLTAGE", "value_id": "1", "value_name": "110V"} in extra
+
+
+def test_generate_draft_stays_blocked_without_an_identical_catalog_product(
+    db_session: Session,
+) -> None:
+    opportunity = _make_opportunity(db_session)
+
+    with _client(_handler_needs("VOLTAGE", "COLOR")) as ml_public_client:
+        none_found = generate_draft(
+            db_session,
+            opportunity,
+            _live(),
+            ml_public_client=ml_public_client,
+            catalog_product_finder=lambda *_: None,
+        )
+        partly = generate_draft(
+            db_session,
+            opportunity,
+            _live(),
+            ml_public_client=ml_public_client,
+            catalog_product_finder=lambda *_: {
+                "attributes": [{"id": "VOLTAGE", "value_name": "110V"}]
+            },
+        )
+
+    assert isinstance(none_found, DraftGenerationError)
+    assert none_found.reason.endswith("COLOR, VOLTAGE")
+    assert isinstance(partly, DraftGenerationError)
+    assert partly.reason.endswith(": COLOR")
