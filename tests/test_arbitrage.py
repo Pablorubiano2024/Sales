@@ -14,7 +14,7 @@ from backend.app.models.opportunity import Opportunity, OpportunityStatus
 from backend.app.models.product import Product
 from backend.app.models.source import Source, SourceType
 from backend.app.schemas.opportunity import OpportunityCreate
-from backend.app.services.arbitrage_engine import evaluate_opportunity
+from backend.app.services.arbitrage_engine import evaluate_opportunity, preview_opportunity
 from backend.app.services.opportunity_engine import classify_opportunity
 from backend.app.services.pricing_engine import calculate_profit_breakdown
 
@@ -178,3 +178,32 @@ def test_evaluate_opportunity_records_detected_analytics_once(db_session: Sessio
         .all()
     )
     assert len(found_events) == 1
+
+
+def test_preview_opportunity_regrades_without_saving(db_session: Session) -> None:
+    product, source, marketplace = _make_product_source_marketplace(db_session)
+    inputs = dict(product_id=product.id, source_id=source.id, marketplace_id=marketplace.id)
+    approved = evaluate_opportunity(
+        db_session,
+        OpportunityCreate(
+            **inputs, buy_price=45000, sell_price=120000, marketplace_fee=12000, shipping_cost=8000
+        ),
+    )
+    approved.confidence_score = 80.0
+    db_session.commit()
+
+    preview = preview_opportunity(
+        approved,
+        OpportunityCreate(
+            **inputs, buy_price=45000, sell_price=90000, marketplace_fee=9000, shipping_cost=8000
+        ),
+    )
+    db_session.commit()
+    db_session.refresh(approved)
+
+    assert preview.status == OpportunityStatus.PROMISING
+    assert float(preview.net_profit) == 28000.0
+    assert preview.confidence_score == 80.0
+    assert approved.status == OpportunityStatus.APPROVED
+    assert float(approved.sell_price) == 120000.0
+    assert db_session.query(Opportunity).count() == 1

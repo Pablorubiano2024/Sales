@@ -81,7 +81,10 @@ from backend.app.models.marketplace import ListingStatus, Marketplace  # noqa: E
 from backend.app.models.opportunity import Opportunity, OpportunityStatus  # noqa: E402
 from backend.app.schemas.opportunity import OpportunityCreate  # noqa: E402
 from backend.app.services import category_lookup, listing_service  # noqa: E402
-from backend.app.services.arbitrage_engine import evaluate_opportunity  # noqa: E402
+from backend.app.services.arbitrage_engine import (  # noqa: E402
+    evaluate_opportunity,
+    preview_opportunity,
+)
 from backend.app.services.listing_draft_service import (  # noqa: E402
     DraftGenerationError,
     fetch_live_source_data,
@@ -266,20 +269,25 @@ def main() -> None:
                     skipped += 1
                     continue
 
-                opp = evaluate_opportunity(
-                    db,
-                    OpportunityCreate(
-                        product_id=product.id,
-                        source_id=opp.source_id,
-                        marketplace_id=marketplace.id,
-                        buy_price=float(opp.buy_price),
-                        sell_price=float(decision.price),
-                        marketplace_fee=float(fee_for(decision.price).quantize(Decimal("0.01"))),
-                        shipping_cost=float(opp.shipping_cost),
-                        tax_cost=float(opp.tax_cost),
-                        payment_cost=float(opp.payment_cost),
-                        other_cost=float(opp.other_cost),
-                    ),
+                repriced = OpportunityCreate(
+                    product_id=product.id,
+                    source_id=opp.source_id,
+                    marketplace_id=marketplace.id,
+                    buy_price=float(opp.buy_price),
+                    sell_price=float(decision.price),
+                    marketplace_fee=float(fee_for(decision.price).quantize(Decimal("0.01"))),
+                    shipping_cost=float(opp.shipping_cost),
+                    tax_cost=float(opp.tax_cost),
+                    payment_cost=float(opp.payment_cost),
+                    other_cost=float(opp.other_cost),
+                )
+                # A dry run must not save the re-pricing: at the launch-mode
+                # floor it re-grades the row PROMISING, dropping it from the
+                # next real run.
+                opp = (
+                    evaluate_opportunity(db, repriced)
+                    if confirm
+                    else preview_opportunity(opp, repriced)
                 )
                 if opp.status not in (OpportunityStatus.APPROVED, OpportunityStatus.PROMISING):
                     print(

@@ -5,6 +5,7 @@ platform — AI enrichment (see ai_service) is layered on top afterwards.
 
 from __future__ import annotations
 
+from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
 from backend.app.core.logging import get_logger
@@ -100,6 +101,41 @@ def evaluate_opportunity(db: Session, inputs: OpportunityCreate) -> Opportunity:
         status.value,
     )
     return opportunity
+
+
+def preview_opportunity(existing: Opportunity, inputs: OpportunityCreate) -> Opportunity:
+    """What `evaluate_opportunity` would turn `existing` into, as a new
+    object outside the session — nothing is saved. A dry run used to
+    persist it, and at the launch-mode floor (30% ROI) that re-graded an
+    APPROVED row as PROMISING, so the next real publish never saw it."""
+    preview = Opportunity(
+        **{c.key: getattr(existing, c.key) for c in inspect(Opportunity).column_attrs}
+    )
+    breakdown = calculate_profit_breakdown(
+        buy_price=inputs.buy_price,
+        sell_price=inputs.sell_price,
+        marketplace_fee=inputs.marketplace_fee,
+        shipping_cost=inputs.shipping_cost,
+        tax_cost=inputs.tax_cost,
+        payment_cost=inputs.payment_cost,
+        other_cost=inputs.other_cost,
+    )
+    for field in (
+        "buy_price",
+        "sell_price",
+        "marketplace_fee",
+        "shipping_cost",
+        "tax_cost",
+        "payment_cost",
+        "other_cost",
+        "gross_profit",
+        "net_profit",
+        "roi",
+        "margin",
+    ):
+        setattr(preview, field, getattr(breakdown, field))
+    preview.status = classify_opportunity(breakdown, risk_score=None)
+    return preview
 
 
 def recompute_opportunity(db: Session, opportunity: Opportunity) -> Opportunity:
