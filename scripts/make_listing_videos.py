@@ -40,6 +40,19 @@ from backend.app.models.marketplace import ListingStatus, MarketplaceProduct  # 
 OUT_DIR = Path(__file__).resolve().parents[1] / "data" / "videos"
 WIDTH, HEIGHT, FPS = 1080, 1920, 30
 SLIDE_SECONDS, FADE_SECONDS = 4.0, 0.5
+MIN_SECONDS = 12.0  # ML rejects videos under 10 s
+
+
+def slide_seconds(n_slides: int) -> float:
+    """4 s a slide, longer when there are too few photos for MIN_SECONDS."""
+    needed = (MIN_SECONDS + (n_slides - 1) * FADE_SECONDS) / n_slides
+    return max(SLIDE_SECONDS, needed)
+
+
+def video_seconds(n_slides: int) -> float:
+    return n_slides * slide_seconds(n_slides) - (n_slides - 1) * FADE_SECONDS
+
+
 MAX_PHOTOS = 6
 FONT_BOLD = "/System/Library/Fonts/Supplemental/Arial Bold.ttf"
 FONT_REGULAR = "/System/Library/Fonts/Supplemental/Arial.ttf"
@@ -155,23 +168,24 @@ def slides_for(item: dict[str, Any], photos: list[Image.Image]) -> list[Image.Im
 
 def render(slides: list[Image.Image], out: Path) -> None:
     """Slow zoom on each slide, cross-fades between them, H.264 MP4."""
+    seconds = slide_seconds(len(slides))
     with tempfile.TemporaryDirectory() as tmp:
         args = ["ffmpeg", "-y", "-loglevel", "error"]
         for i, slide in enumerate(slides):
             path = Path(tmp) / f"{i}.png"
             slide.save(path)
-            args += ["-loop", "1", "-framerate", str(FPS), "-t", str(SLIDE_SECONDS)]
+            args += ["-loop", "1", "-framerate", str(FPS), "-t", str(seconds)]
             args += ["-i", str(path)]
         # Zoom in 6% over the slide by rescaling each frame and cropping the
         # center (zoompan emits `d` frames per input frame: minutes long).
         filters = [
-            f"[{i}:v]scale=w='trunc({WIDTH}*(1+0.06*t/{SLIDE_SECONDS})/2)*2':h=-2:eval=frame,"
+            f"[{i}:v]scale=w='trunc({WIDTH}*(1+0.06*t/{seconds})/2)*2':h=-2:eval=frame,"
             f"crop={WIDTH}:{HEIGHT},setsar=1,format=yuv420p[s{i}]"
             for i in range(len(slides))
         ]
         last = "s0"
         for i in range(1, len(slides)):
-            offset = i * (SLIDE_SECONDS - FADE_SECONDS)
+            offset = i * (seconds - FADE_SECONDS)
             filters.append(
                 f"[{last}][s{i}]xfade=transition=fade:duration={FADE_SECONDS}:offset={offset}[x{i}]"
             )
@@ -186,7 +200,7 @@ def render(slides: list[Image.Image], out: Path) -> None:
             "-preset",
             "fast",
             "-t",
-            str(len(slides) * SLIDE_SECONDS),
+            str(len(slides) * seconds),
             "-pix_fmt",
             "yuv420p",
             "-r",
@@ -241,7 +255,7 @@ def main() -> None:
             out = OUT_DIR / f"{item['id']}.mp4"
             slides = slides_for(item, photos)
             render(slides, out)
-            seconds = len(slides) * SLIDE_SECONDS - (len(slides) - 1) * FADE_SECONDS
+            seconds = video_seconds(len(slides))
             print(f"OK    {item['id']}: {out} ({seconds:.0f}s) {item['title'][:50]}")
 
 
