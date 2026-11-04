@@ -310,3 +310,40 @@ def test_get_price_and_get_stock_delegate_to_get_product() -> None:
 def test_get_product_url_does_not_require_network() -> None:
     adapter = _adapter(lambda request: httpx.Response(500))
     assert adapter.get_product_url("42") == "https://www.falabella.com.co/falabella-co/product/42"
+
+
+def _cmr_product() -> dict:
+    """Real price shape, Caixun 43" TV (73296706) on 2026-11-04."""
+    return {
+        "id": "73296706",
+        "name": "Televisor Caixun 43 pulgadas",
+        "isOutOfStock": False,
+        "prices": [
+            {"type": "cmrPrice", "crossed": False, "price": ["899.900"]},
+            {"type": "internetPrice", "crossed": False, "price": ["999.900"]},
+            {"type": "normalPrice", "crossed": True, "price": ["3.329.900"]},
+        ],
+    }
+
+
+def _cmr_handler(request: httpx.Request) -> httpx.Response:
+    return httpx.Response(200, text=_html_with_next_data({"productData": _cmr_product()}))
+
+
+def test_get_product_buys_at_the_cmr_price_with_a_falabella_card() -> None:
+    adapter = FalabellaSourceAdapter(transport=httpx.MockTransport(_cmr_handler), cmr_card=True)
+
+    product = adapter.get_product("73296706")
+
+    assert product is not None
+    assert product.price == Decimal("899900")
+    assert product.reference_price == Decimal("3329900")
+
+
+def test_get_product_ignores_the_cmr_price_without_the_card() -> None:
+    adapter = FalabellaSourceAdapter(transport=httpx.MockTransport(_cmr_handler), cmr_card=False)
+
+    product = adapter.get_product("73296706")
+
+    assert product is not None
+    assert product.price == Decimal("999900")

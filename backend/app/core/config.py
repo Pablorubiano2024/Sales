@@ -80,6 +80,11 @@ class Settings(BaseSettings):
     slack_bot_token: str | None = None
     slack_sales_channel: str | None = None
 
+    # The seller pays with a Falabella card (CMR), so Falabella/Homecenter's
+    # "precio CMR" is our real buy price where a product has one (user,
+    # 2026-11-04). FALABELLA_CMR_CARD=false prices at the internet price.
+    falabella_cmr_card: bool = True
+
     # --- Arbitrage thresholds (defaults; configurable, never hard-coded inline) ---
     min_roi: Decimal = Decimal("0.30")
     min_net_profit: Decimal = Decimal("20000")

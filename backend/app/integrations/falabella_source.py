@@ -45,6 +45,7 @@ from typing import Any
 
 import httpx
 
+from backend.app.core.config import get_settings
 from backend.app.core.logging import get_logger
 from backend.app.integrations.base import SourceAdapter, SourceProductInfo
 
@@ -96,9 +97,26 @@ def _parse_cop_price(raw: str) -> Decimal | None:
 _LIVE_PRICE_TYPES = ("internetPrice", "eventPrice")
 
 
-def _best_price(prices: list[dict[str, Any]]) -> Decimal | None:
+def _cmr_price(prices: list[dict[str, Any]]) -> Decimal | None:
+    """The "precio CMR" (paying with a Falabella card), when listed."""
+    entry = next((p for p in prices if p.get("type") == "cmrPrice"), None)
+    values = (entry or {}).get("price") or []
+    return _parse_cop_price(values[0]) if values else None
+
+
+def _best_price(prices: list[dict[str, Any]], *, cmr_card: bool = False) -> Decimal | None:
     """Prefer a known live-price type; fall back to whatever's first (with
-    a warning, since that's a positional guess, not a recognized type)."""
+    a warning, since that's a positional guess, not a recognized type).
+    With `cmr_card`, a lower "precio CMR" wins: that's what we really pay
+    (2026-11-04: 6 of 38 products had one, 100,000-200,000 below)."""
+    live = _live_price(prices)
+    cmr = _cmr_price(prices) if cmr_card else None
+    if cmr is not None and (live is None or cmr < live):
+        return cmr
+    return live
+
+
+def _live_price(prices: list[dict[str, Any]]) -> Decimal | None:
     by_type = {p.get("type"): p for p in prices}
     entry = next((by_type[t] for t in _LIVE_PRICE_TYPES if t in by_type), None)
     if entry is None and prices:
@@ -170,8 +188,10 @@ class FalabellaSourceAdapter(SourceAdapter):
         timeout: float = DEFAULT_TIMEOUT,
         transport: httpx.BaseTransport | None = None,
         path_prefix: str = "falabella-co",
+        cmr_card: bool | None = None,
     ) -> None:
         self._path_prefix = path_prefix
+        self._cmr_card = get_settings().falabella_cmr_card if cmr_card is None else cmr_card
         # Homecenter's /search redirects (301) to a real category page for
         # a recognized term (e.g. "taladro" -> /category/CATG32701/Taladros)
         # — confirmed live 2026-09-25 — which carries the same
@@ -189,7 +209,7 @@ class FalabellaSourceAdapter(SourceAdapter):
 
     def _parse_search_result(self, item: dict[str, Any]) -> SourceProductInfo | None:
         prices = item.get("prices") or []
-        price = _best_price(prices)
+        price = _best_price(prices, cmr_card=self._cmr_card)
         if price is None:
             logger.warning(
                 "Falabella product %s has an unparseable/missing price; skipping",
@@ -257,13 +277,13 @@ class FalabellaSourceAdapter(SourceAdapter):
         variant = next((v for v in variants if str(v.get("id")) == current), None)
 
         prices = product.get("prices") or []
-        price = _best_price(prices)
+        price = _best_price(prices, cmr_card=self._cmr_card)
         if price is None:
             # Top-level productData doesn't always carry prices; the active
             # variant's do (see module docstring — "variants").
             if variant is not None:
                 prices = variant.get("prices") or []
-                price = _best_price(prices)
+                price = _best_price(prices, cmr_card=self._cmr_card)
         if price is None:
             logger.warning(
                 "%s get_product('%s'): unparseable/missing price", self.source_label, external_id
@@ -322,7 +342,12 @@ class HomecenterSourceAdapter(FalabellaSourceAdapter):
         timeout: float = DEFAULT_TIMEOUT,
         transport: httpx.BaseTransport | None = None,
         path_prefix: str = "homecenter-co",
+        cmr_card: bool | None = None,
     ) -> None:
         super().__init__(
-            base_url=base_url, timeout=timeout, transport=transport, path_prefix=path_prefix
+            base_url=base_url,
+            timeout=timeout,
+            transport=transport,
+            path_prefix=path_prefix,
+            cmr_card=cmr_card,
         )

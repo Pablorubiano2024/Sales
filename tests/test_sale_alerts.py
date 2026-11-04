@@ -9,9 +9,12 @@ from decimal import Decimal
 import httpx
 from sqlalchemy.orm import Session
 
+from backend.app.models.marketplace import Marketplace
+from backend.app.models.opportunity import Opportunity
 from backend.app.models.order import Order, SaleAlert
 from backend.app.models.product import Product
-from backend.app.services.sale_alerts import SlackClient, run_sale_alerts
+from backend.app.models.source import Source, SourceType
+from backend.app.services.sale_alerts import SlackClient, alert_text, run_sale_alerts
 
 
 class _FakeSlack:
@@ -74,3 +77,27 @@ def test_slack_failure_is_not_raised(db_session: Session) -> None:
         transport=httpx.MockTransport(lambda _: httpx.Response(200, json={"ok": False})),
     )
     assert run_sale_alerts(db_session, slack, "C1").sent == 0
+
+
+def test_alert_reminds_to_pay_with_the_falabella_card(db_session: Session) -> None:
+    order = _order(db_session)
+    falabella = Source(name="Falabella Colombia", source_type=SourceType.API)
+    marketplace = Marketplace(name="MercadoLibre Colombia")
+    db_session.add_all([falabella, marketplace])
+    db_session.commit()
+    opportunity = Opportunity(
+        product_id=order.product_id,
+        source_id=falabella.id,
+        marketplace_id=marketplace.id,
+        buy_price=Decimal("899900"),
+        sell_price=Decimal("1461900"),
+    )
+    db_session.add(opportunity)
+    db_session.commit()
+
+    without_source = alert_text(db_session, order, None, reminder=0)
+    order.opportunity_id = opportunity.id
+    with_falabella = alert_text(db_session, order, None, reminder=0)
+
+    assert "tarjeta Falabella" not in without_source
+    assert "tarjeta Falabella" in with_falabella

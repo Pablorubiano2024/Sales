@@ -22,11 +22,12 @@ from datetime import datetime, timedelta
 import httpx
 from sqlalchemy.orm import Session
 
+from backend.app.core.config import get_settings
 from backend.app.core.logging import get_logger
 from backend.app.core.time import utcnow
 from backend.app.models.opportunity import Opportunity
 from backend.app.models.order import Order, OrderStatus, SaleAlert
-from backend.app.models.source import SourceProduct
+from backend.app.models.source import Source, SourceProduct
 
 logger = get_logger(__name__)
 
@@ -91,6 +92,16 @@ def _source_url(db: Session, order: Order) -> str | None:
     return source_product.url if source_product else None
 
 
+# Sources priced at their "precio CMR" (falabella_source.py).
+CMR_SOURCES = {"Falabella Colombia", "Homecenter Colombia"}
+
+
+def _pays_with_cmr(db: Session, order: Order) -> bool:
+    opportunity = db.get(Opportunity, order.opportunity_id) if order.opportunity_id else None
+    source = db.get(Source, opportunity.source_id) if opportunity else None
+    return bool(get_settings().falabella_cmr_card and source and source.name in CMR_SOURCES)
+
+
 def _cop(value: object) -> str:
     return f"${value:,.0f}".replace(",", ".")
 
@@ -112,6 +123,8 @@ def alert_text(db: Session, order: Order, deadline: str | None, reminder: int) -
     source_url = _source_url(db, order)
     if source_url:
         lines.append(f"Comprar en: {source_url}")
+    if _pays_with_cmr(db, order):
+        lines.append("💳 Paga con tu tarjeta Falabella: el costo asume el precio CMR.")
     if order.marketplace_order_id:
         lines.append(f"Venta: {ORDER_URL.format(order_id=order.marketplace_order_id)}")
     lines.append("Reacciona con ✅ a este mensaje para dejar de recibir recordatorios.")
