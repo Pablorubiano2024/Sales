@@ -244,11 +244,11 @@ def main() -> None:
     with httpx.Client(timeout=30) as http:
         for item in items:
             urls = [p.get("secure_url") or p.get("url") for p in item.get("pictures") or []]
-            photos = []
+            photos: list[Image.Image] = []
             for url in [u for u in urls if u][:MAX_PHOTOS]:
                 response = http.get(url)
                 if response.status_code == 200:
-                    photos.append(Image.open(BytesIO(response.content)))
+                    photos.append(Image.open(BytesIO(response.content)).convert("RGB"))
             if not photos:
                 print(f"SKIP  {item['id']}: sin fotos")
                 continue

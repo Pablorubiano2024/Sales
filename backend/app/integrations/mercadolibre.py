@@ -448,6 +448,23 @@ class MercadoLibreAdapter(MarketplaceAdapter):
         data: dict[str, Any] = response.json()
         return data
 
+    def get_unanswered_questions(self) -> list[dict[str, Any]] | None:
+        """GET /my/received_questions/search?status=UNANSWERED (api v4):
+        buyers' questions still waiting for an answer, oldest first. Needs
+        the app's "Comunicaciones pre y post venta" permission (granted
+        2026-11-04). None on failure, so callers don't take it as "all
+        answered"."""
+        response = self._client.get(
+            "/my/received_questions/search",
+            headers=self._auth_headers(),
+            params={"status": "UNANSWERED", "api_version": 4, "sort_fields": "date_created"},
+        )
+        if response.status_code != 200:
+            logger.warning("received_questions failed: %s", response.text)
+            return None
+        questions: list[dict[str, Any]] = response.json().get("questions") or []
+        return questions
+
     def get_catalog_product(self, catalog_product_id: str) -> dict[str, Any] | None:
         """GET /products/{id} — the catalog product's own name/attributes."""
         response = self._client.get(f"/products/{catalog_product_id}", headers=self._auth_headers())

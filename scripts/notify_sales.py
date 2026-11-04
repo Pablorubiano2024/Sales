@@ -1,6 +1,7 @@
 """Imports new MercadoLibre sales and alerts Slack until each one gets a ✅
-(see backend/app/services/sale_alerts.py). Runs inside the stock-check
-workflow. Needs SLACK_BOT_TOKEN and SLACK_SALES_CHANNEL; without them it
+(see backend/app/services/sale_alerts.py), and alerts every unanswered
+buyer question until it's answered (question_alerts.py). Runs inside the
+stock-check workflow. Needs SLACK_BOT_TOKEN and SLACK_SALES_CHANNEL; without them it
 only imports the sales.
 
 Usage:
@@ -18,6 +19,7 @@ from backend.app.core.config import get_settings  # noqa: E402
 from backend.app.core.database import SessionLocal, init_db  # noqa: E402
 from backend.app.integrations.mercadolibre import MercadoLibreAdapter  # noqa: E402
 from backend.app.jobs.order_sync import run_order_sync  # noqa: E402
+from backend.app.services.question_alerts import run_question_alerts  # noqa: E402
 from backend.app.services.sale_alerts import SlackClient, run_sale_alerts  # noqa: E402
 
 
@@ -39,12 +41,21 @@ def main() -> None:
                 run = run_sale_alerts(
                     db, slack, settings.slack_sales_channel, deadline_for=ml.get_dispatch_deadline
                 )
+                print(
+                    f"Alertas enviadas: {run.sent}  Confirmadas ✅: {run.acknowledged}  "
+                    f"Esperando: {run.waiting}"
+                )
+                unanswered = ml.get_unanswered_questions()
+                if unanswered is None:
+                    print("No se pudieron leer las preguntas — sin alertas de preguntas.")
+                    return
+                questions = run_question_alerts(db, slack, settings.slack_sales_channel, unanswered)
+                print(
+                    f"Preguntas sin responder: {len(unanswered)}  Alertas: {questions.sent}  "
+                    f"Respondidas: {questions.answered}"
+                )
             finally:
                 slack.close()
-            print(
-                f"Alertas enviadas: {run.sent}  Confirmadas ✅: {run.acknowledged}  "
-                f"Esperando: {run.waiting}"
-            )
     finally:
         db.close()
 

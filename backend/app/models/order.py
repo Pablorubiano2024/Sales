@@ -95,3 +95,18 @@ class SaleAlert(Base):
     last_sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class QuestionAlert(Base):
+    """Slack alert for one unanswered buyer question (question_alerts.py),
+    re-sent while MercadoLibre still lists it as UNANSWERED."""
+
+    __tablename__ = "question_alerts"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    question_id: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    item_id: Mapped[str] = mapped_column(String(32))
+    message_ts: Mapped[str] = mapped_column(Text, default="[]")
+    last_sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    answered_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
