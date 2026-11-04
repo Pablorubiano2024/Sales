@@ -29,6 +29,11 @@ on:
     # ~4.5h earlier than desired aims the actual run at ~11:00 UTC —
     # still before publish and sync. Revisit if the delay pattern changes.
     - cron: "30 6 * * *"
+    # Black Friday (2026-11-27) through Cyber Monday: retail prices drop and
+    # come back within hours, so 3 extra runs a day, Nov 24 - Dec 1 (user,
+    # 2026-11-04). Cron has no year: remove after 2026-12-01.
+    - cron: "30 0,12,18 24-30 11 *"
+    - cron: "30 0,12,18 1 12 *"
   workflow_dispatch: {}
 
 jobs:

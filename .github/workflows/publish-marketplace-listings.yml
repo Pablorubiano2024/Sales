@@ -30,6 +30,10 @@ on:
     # 2026-09-26. Still runs after discover (06:30 UTC cron) and before
     # sync (07:30 UTC cron) in real fire order.
     - cron: "0 7 * * *"
+    # Black Friday week: publish after each extra discovery run (see
+    # discover-opportunities.yml). Remove after 2026-12-01.
+    - cron: "30 1,13,19 24-30 11 *"
+    - cron: "30 1,13,19 1 12 *"
   workflow_dispatch: {}
 
 jobs:
