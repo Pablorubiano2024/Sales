@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from backend.app.models.marketplace import Marketplace
 from backend.app.models.opportunity import Opportunity
-from backend.app.models.order import Order, SaleAlert
+from backend.app.models.order import CustomerShippingStatus, Order, SaleAlert
 from backend.app.models.product import Product
 from backend.app.models.source import Source, SourceType
 from backend.app.services.sale_alerts import SlackClient, alert_text, run_sale_alerts
@@ -101,3 +101,13 @@ def test_alert_reminds_to_pay_with_the_falabella_card(db_session: Session) -> No
 
     assert "tarjeta Falabella" not in without_source
     assert "tarjeta Falabella" in with_falabella
+
+
+def test_no_alert_once_the_sale_has_shipped(db_session: Session) -> None:
+    order = _order(db_session)
+    order.customer_shipping_status = CustomerShippingStatus.SHIPPED
+    db_session.commit()
+    fake = _FakeSlack()
+    slack = SlackClient("xoxb-test", transport=httpx.MockTransport(fake.handler))
+    assert run_sale_alerts(db_session, slack, "C1").sent == 0
+    assert fake.posts == []

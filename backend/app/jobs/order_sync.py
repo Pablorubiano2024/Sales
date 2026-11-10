@@ -17,9 +17,10 @@ from backend.app.integrations.base import MarketplaceOrderInfo
 from backend.app.integrations.mercadolibre import MercadoLibreAdapter
 from backend.app.models.marketplace import MarketplaceProduct
 from backend.app.models.opportunity import Opportunity
-from backend.app.models.order import Order
+from backend.app.models.order import CustomerShippingStatus, Order, OrderStatus
 from backend.app.services.listing_optimizer import origin_source
 from backend.app.services.order_router import create_order_from_sale
+from backend.app.services.order_service import cancel_order, mark_completed, mark_shipped
 
 logger = get_logger(__name__)
 
@@ -59,6 +60,27 @@ def _sale_costs(
     return fees, shipping if isinstance(shipping, Decimal) else Decimal("0")
 
 
+def _refresh_status(
+    db: Session, adapter: MercadoLibreAdapter, order: Order, order_info: MarketplaceOrderInfo
+) -> None:
+    """Follow a recorded sale on MercadoLibre: cancelled, shipped or
+    delivered. Without it a sale stays "not shipped" forever and its Slack
+    alert keeps asking to dispatch it (2026-11-05 sale: 21 reminders after
+    it had shipped)."""
+    if order.status in (OrderStatus.COMPLETED, OrderStatus.CANCELLED):
+        return
+    if order_info.status == "cancelled":
+        cancel_order(db, order)
+        return
+    shipment_id = ((order_info.raw or {}).get("shipping") or {}).get("id")
+    status = adapter.get_shipment_status(shipment_id) if shipment_id else None
+    if status == "delivered":
+        mark_completed(db, order)
+    elif status == "shipped":
+        if order.customer_shipping_status == CustomerShippingStatus.NOT_SHIPPED:
+            mark_shipped(db, order)
+
+
 def run_order_sync(db: Session, adapter: MercadoLibreAdapter, since: str | None = None) -> int:
     """Fetch real MercadoLibre orders and create an internal Order
     (Sandbox mode) for each real sale not already recorded. Returns the
@@ -69,6 +91,7 @@ def run_order_sync(db: Session, adapter: MercadoLibreAdapter, since: str | None 
     for order_info in orders:
         existing = db.query(Order).filter_by(marketplace_order_id=order_info.external_id).first()
         if existing is not None:
+            _refresh_status(db, adapter, existing, order_info)
             continue
 
         if order_info.item_external_id is None:

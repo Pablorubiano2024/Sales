@@ -424,6 +424,15 @@ class MercadoLibreAdapter(MarketplaceAdapter):
                 return Decimal(str(sender["cost"]))
         return None
 
+    def get_shipment_status(self, shipment_id: int | str) -> str | None:
+        """GET /shipments/{id} `status`: pending, handling, ready_to_ship,
+        shipped, delivered, not_delivered, cancelled. None on failure."""
+        response = self._client.get(f"/shipments/{shipment_id}", headers=self._auth_headers())
+        if response.status_code != 200:
+            return None
+        status = response.json().get("status")
+        return status if isinstance(status, str) else None
+
     def get_dispatch_deadline(self, order_id: str) -> str | None:
         """When MercadoLibre expects this sale handed to Mercado Envíos:
         GET /orders/{id} -> shipping.id -> /shipments/{id}/sla expected_date

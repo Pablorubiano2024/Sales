@@ -26,7 +26,7 @@ from backend.app.core.config import get_settings
 from backend.app.core.logging import get_logger
 from backend.app.core.time import utcnow
 from backend.app.models.opportunity import Opportunity
-from backend.app.models.order import Order, OrderStatus, SaleAlert
+from backend.app.models.order import CustomerShippingStatus, Order, OrderStatus, SaleAlert
 from backend.app.models.source import Source, SourceProduct
 
 logger = get_logger(__name__)
@@ -141,7 +141,16 @@ def run_sale_alerts(
 ) -> AlertRun:
     now = now or utcnow()
     result = AlertRun()
-    orders = db.query(Order).filter(Order.status != OrderStatus.CANCELLED).all()
+    # Only sales still waiting to be dispatched: once MercadoLibre reports
+    # one shipped (order_sync), there's nothing left to remind about.
+    orders = (
+        db.query(Order)
+        .filter(
+            Order.status != OrderStatus.CANCELLED,
+            Order.customer_shipping_status == CustomerShippingStatus.NOT_SHIPPED,
+        )
+        .all()
+    )
     for order in orders:
         alert = db.query(SaleAlert).filter_by(order_id=order.id).first()
         if alert is None:

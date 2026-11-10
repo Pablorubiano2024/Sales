@@ -15,7 +15,7 @@ from backend.app.jobs import order_sync
 from backend.app.jobs.order_sync import run_order_sync
 from backend.app.models.marketplace import Marketplace, MarketplaceProduct
 from backend.app.models.opportunity import Opportunity, OpportunityStatus
-from backend.app.models.order import Order
+from backend.app.models.order import CustomerShippingStatus, Order, OrderStatus
 from backend.app.models.product import Product
 from backend.app.models.source import Source, SourceProduct, SourceType
 
@@ -239,3 +239,62 @@ def test_run_order_sync_links_the_origin_source_not_the_latest_look_alike(
 
     assert wanted is not None
     assert order_sync._resolve_opportunity_id(db_session, listing) == wanted.id
+
+
+def _recorded_sale(db: Session) -> Order:
+    listing = _make_listing(db, external_id="MCO123")
+    order = Order(
+        marketplace_order_id="ML-1",
+        product_id=listing.product_id,
+        selling_price=Decimal("200000"),
+        supplier_price=Decimal("100000"),
+    )
+    db.add(order)
+    db.commit()
+    return order
+
+
+def _sale_info(status: str = "paid") -> MarketplaceOrderInfo:
+    return MarketplaceOrderInfo(
+        external_id="ML-1",
+        status=status,
+        total_amount=Decimal("200000"),
+        currency="COP",
+        item_external_id="MCO123",
+        raw={"shipping": {"id": 48440293688}},
+    )
+
+
+def test_run_order_sync_marks_a_recorded_sale_shipped(db_session: Session) -> None:
+    order = _recorded_sale(db_session)
+    adapter = MagicMock()
+    adapter.get_orders.return_value = [_sale_info()]
+    adapter.get_shipment_status.return_value = "shipped"
+
+    assert run_order_sync(db_session, adapter) == 0
+    adapter.get_shipment_status.assert_called_once_with(48440293688)
+    assert order.customer_shipping_status == CustomerShippingStatus.SHIPPED
+
+
+def test_run_order_sync_completes_a_delivered_sale(db_session: Session) -> None:
+    order = _recorded_sale(db_session)
+    adapter = MagicMock()
+    adapter.get_orders.return_value = [_sale_info()]
+    adapter.get_shipment_status.return_value = "delivered"
+
+    run_order_sync(db_session, adapter)
+    assert order.status == OrderStatus.COMPLETED
+    assert order.customer_shipping_status == CustomerShippingStatus.DELIVERED
+
+    run_order_sync(db_session, adapter)  # finished sales aren't looked up again
+    assert adapter.get_shipment_status.call_count == 1
+
+
+def test_run_order_sync_cancels_a_cancelled_sale(db_session: Session) -> None:
+    order = _recorded_sale(db_session)
+    adapter = MagicMock()
+    adapter.get_orders.return_value = [_sale_info("cancelled")]
+
+    run_order_sync(db_session, adapter)
+    assert order.status == OrderStatus.CANCELLED
+    adapter.get_shipment_status.assert_not_called()
