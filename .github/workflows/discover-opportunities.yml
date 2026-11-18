@@ -62,6 +62,9 @@ jobs:
           # Alkosto/Falabella, but its own store has its own product ids.
           - name: brand-stores
             scripts: discover_sony.py discover_electrolux.py discover_haceb.py
+          # Whirlpool also owns KitchenAid; one group so they never race.
+          - name: brand-stores-2
+            scripts: discover_whirlpool.py discover_kitchenaid.py discover_challenger.py
     name: discover (${{ matrix.group.name }})
     steps:
       - uses: actions/checkout@v4

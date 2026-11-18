@@ -45,11 +45,14 @@ from backend.app.integrations.falabella_source import (
     HomecenterSourceAdapter,
 )
 from backend.app.integrations.imusa_source import (
+    ChallengerSourceAdapter,
     ElectroluxSourceAdapter,
     HacebSourceAdapter,
     ImusaSourceAdapter,
     JumboSourceAdapter,
+    KitchenAidSourceAdapter,
     SonySourceAdapter,
+    WhirlpoolSourceAdapter,
 )
 from backend.app.integrations.tecnologiamayorista_source import (
     TecnologiaMayoristaSourceAdapter,
@@ -82,6 +85,9 @@ SUPPORTED_SOURCES: dict[str, type[SourceAdapter]] = {
     "Sony Store Colombia": SonySourceAdapter,
     "Electrolux Colombia": ElectroluxSourceAdapter,
     "Haceb Colombia": HacebSourceAdapter,
+    "Whirlpool Colombia": WhirlpoolSourceAdapter,
+    "KitchenAid Colombia": KitchenAidSourceAdapter,
+    "Challenger Colombia": ChallengerSourceAdapter,
 }
 
 

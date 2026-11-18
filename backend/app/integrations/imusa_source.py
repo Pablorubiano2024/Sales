@@ -278,3 +278,20 @@ class HacebSourceAdapter(_BrandStoreAdapter):
     source_label = "Haceb"
     base_url = "https://www.haceb.com"
     brand_name = "Haceb"
+
+
+# Added 2026-11-18, same checks (robots.txt doesn't disallow
+# /api/catalog_system/; Whirlpool only disallows /api/graphql/).
+class WhirlpoolSourceAdapter(_BrandStoreAdapter):
+    source_label = "Whirlpool"
+    base_url = "https://www.whirlpool.com.co"
+
+
+class KitchenAidSourceAdapter(_BrandStoreAdapter):
+    source_label = "KitchenAid"
+    base_url = "https://www.kitchenaid.com.co"
+
+
+class ChallengerSourceAdapter(_BrandStoreAdapter):
+    source_label = "Challenger"
+    base_url = "https://www.challenger.com.co"
