@@ -319,6 +319,10 @@ _KNOWN_SYNONYMS: dict[str, str] = {
     "conexion bluetooth": "WITH_BLUETOOTH",
     # Alkosto/Ktronix label, checked 2026-10-15 (values below).
     "fuentes de alimentacion de energia": "POWER_SUPPLY_TYPE",
+    # Alkosto/Ktronix labels, checked 2026-11-18.
+    "tamano pantalla": "DISPLAY_SIZE",
+    "tipo de alimentacion de la lavadora": "POWER_SUPPLY_TYPE",
+    "capacidad carga lavado": "WASHING_MACHINE_CAPACITY",
 }
 
 # Confirmed real source wordings for a bounded attribute value, by
@@ -329,6 +333,15 @@ _KNOWN_VALUE_SYNONYMS: dict[str, dict[str, str]] = {
         "energia electrica": "Corriente doméstica",
         "bateria recargable interna": "Batería",
         "bateria recargable": "Batería",
+    },
+    # Homecenter's "Tipo de ventilador" = "Torre" (2026-11-18).
+    "FAN_TYPE": {
+        "torre": "De torre",
+        "pared": "De pared",
+        "pie": "De pie",
+        "mesa": "De mesa",
+        "piso": "De piso",
+        "ventana": "De ventana",
     },
 }
 
@@ -341,6 +354,17 @@ _UNIT_ALIASES: dict[str, str] = {
     "pulgada": '"',
     "pulg": '"',
     "in": '"',
+    "kilos": "kg",
+    "kilo": "kg",
+    "kilogramos": "kg",
+    "kg": "kg",
+    "libras": "lb",
+    "lb": "lb",
+    "litros": "L",
+    "litro": "L",
+    "lts": "L",
+    "lt": "L",
+    "l": "L",
 }
 _NUMBER_WITH_UNIT = re.compile(r"^\s*(\d+(?:[.,]\d+)?)\s*([^\d\s].*?)?\s*$")
 _VOLTS = re.compile(r"(\d+)\s*v\b", re.IGNORECASE)
@@ -470,3 +494,91 @@ def match_specifications(
         matched.append({"id": attr_id, "value_name": value})
         seen_ids.add(attr_id)
     return matched
+
+
+# What a product's own title states plainly (Ktronix "TV LG 55\" Pulgadas…",
+# Alkosto "Lavadora LG Carga Frontal 20 Kilos…", "Nevera … 461 Litros…").
+_TITLE_NUMBER_UNIT: dict[str, re.Pattern[str]] = {
+    "DISPLAY_SIZE": re.compile(r"(\d+(?:[.,]\d+)?)\s*(?:\"|”|″|pulgadas?\b)", re.I),
+    "WASHING_MACHINE_CAPACITY": re.compile(
+        r"(\d+(?:[.,]\d+)?)\s*(kilos?|kg|kilogramos|libras|lb)\b", re.I
+    ),
+    "VOLUME_CAPACITY": re.compile(r"(\d+(?:[.,]\d+)?)\s*(litros?|lts?|l)\b", re.I),
+}
+_FEMININE_COLORS = {"negra": "negro", "blanca": "blanco", "roja": "rojo", "amarilla": "amarillo"}
+_BATTERY_WORDS = ("bateria", "inalambric", "recargable", "robot")
+
+
+def _title_color(attr: dict[str, Any], text: str) -> str | None:
+    """The one color of the attribute's real list named as a whole word
+    in `text` ("…Filtro HEPA Negra" -> "Negro"); None if none or several
+    ("Gris/Azul")."""
+    words = [_FEMININE_COLORS.get(w, w) for w in re.findall(r"[a-z]+", _normalize(text))]
+    joined = f" {' '.join(words)} "
+    found = {v["name"] for v in attr.get("values") or [] if f" {_normalize(v['name'])} " in joined}
+    # "Azul oscuro" also contains "Azul": keep only the most specific.
+    found = {f for f in found if not any(f != g and _normalize(f) in _normalize(g) for g in found)}
+    return found.pop() if len(found) == 1 else None
+
+
+def infer_from_listing(
+    category_id: str,
+    name: str,
+    specifications: tuple[tuple[str, str], ...],
+    attribute_ids: list[str],
+    *,
+    client: httpx.Client,
+) -> list[dict[str, str]]:
+    """Values for still-missing `attribute_ids` that the product's own
+    title/specs state, always one of the category's real values:
+      - sizes/capacities written in the title ("55\\"", "14 Kilos", "461 Litros");
+      - washer loading/type ("Carga Frontal" -> Frontal + Automática, since
+        front loaders are all automatic; "SemiAutomatica" -> Semi-automática);
+      - the one color named in the spec "Color" value or the title.
+    And two inferences from where we buy (2026-11-18, user: "solucionemos
+    lo que está en nuestro control"):
+      - VOLTAGE "110V" for a product sold by a Colombian retailer for the
+        Colombian 110-120 V grid, unless its title/specs mention 220 V;
+      - POWER_SUPPLY_TYPE "Corriente doméstica" for a corded appliance (a
+        power rating in W, no battery/cordless/robot wording)."""
+    if not attribute_ids:
+        return []
+    attributes = {a["id"]: a for a in list_attributes(category_id, client=client)}
+    text = " ".join([name, *(f"{k} {v}" for k, v in specifications)])
+    norm = _normalize(text)
+    color_spec = next((v for k, v in specifications if _normalize(k) == "color"), None)
+
+    out: list[dict[str, str]] = []
+    for attr_id in attribute_ids:
+        attr = attributes.get(attr_id)
+        if attr is None:
+            continue
+        value: str | None = None
+        if attr_id in _TITLE_NUMBER_UNIT:
+            match = _TITLE_NUMBER_UNIT[attr_id].search(name)
+            if match:
+                value = _match_number_unit(attr, " ".join(g for g in match.groups() if g))
+        elif attr_id == "LOADING_TYPE":
+            for word, option in (("carga frontal", "Frontal"), ("carga superior", "Superior")):
+                if word in norm:
+                    value = _match_bounded_value(attr, option)
+                    break
+        elif attr_id == "WASHING_MACHINE_TYPE":
+            if re.search(r"semi[\s-]?automatica", norm):
+                value = _match_bounded_value(attr, "Semi-automática")
+            elif "carga frontal" in norm or re.search(r"\bautomatica\b", norm):
+                value = _match_bounded_value(attr, "Automática")
+        elif attr_id == "COLOR":
+            value = (_title_color(attr, color_spec) if color_spec else None) or _title_color(
+                attr, name
+            )
+        elif attr_id == "VOLTAGE":
+            if "220" not in norm:
+                value = _match_bounded_value(attr, "110V")
+        elif attr_id == "POWER_SUPPLY_TYPE":
+            corded = re.search(r"\b\d{3,4}\s*(?:w|watts?)\b", norm)
+            if corded and not any(w in norm for w in _BATTERY_WORDS):
+                value = _match_bounded_value(attr, "Corriente doméstica")
+        if value is not None and (attr.get("values") or attr_id in _TITLE_NUMBER_UNIT):
+            out.append({"id": attr_id, "value_name": value})
+    return out

@@ -243,6 +243,15 @@ def generate_draft(
             extra_attributes = [*extra_attributes, *copied]
             covered_attribute_ids = covered_attribute_ids | {a["id"] for a in copied}
             missing = [a for a in missing if a not in covered_attribute_ids]
+    # Last: what the product's own title/specs state, and the two
+    # where-we-buy inferences (see category_lookup.infer_from_listing).
+    if missing:
+        inferred = category_lookup.infer_from_listing(
+            category_id, real_name, live.specifications, missing, client=ml_public_client
+        )
+        extra_attributes = [*extra_attributes, *inferred]
+        covered_attribute_ids = covered_attribute_ids | {a["id"] for a in inferred}
+        missing = [a for a in missing if a not in covered_attribute_ids]
     if missing:
         return DraftGenerationError(
             f"Categoría {category_id} requiere atributos que no podemos completar "

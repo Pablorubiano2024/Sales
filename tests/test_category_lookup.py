@@ -536,3 +536,132 @@ def test_match_specifications_matches_boolean_value_from_yes_no_text() -> None:
         matched = category_lookup.match_specifications("MCO118449", specifications, client=client)
 
     assert matched == [{"id": "WITH_BLUETOOTH", "value_name": "Sí"}]
+
+
+_APPLIANCE_ATTRIBUTES = [
+    {
+        "id": "DISPLAY_SIZE",
+        "name": "Tamaño de la pantalla",
+        "value_type": "number_unit",
+        "allowed_units": [{"id": '"', "name": '"'}],
+    },
+    {
+        "id": "WASHING_MACHINE_CAPACITY",
+        "name": "Capacidad de la lavadora",
+        "value_type": "number_unit",
+        "allowed_units": [{"id": "kg", "name": "kg"}, {"id": "lb", "name": "lb"}],
+    },
+    {
+        "id": "VOLUME_CAPACITY",
+        "name": "Capacidad en volumen",
+        "value_type": "number_unit",
+        "allowed_units": [{"id": "L", "name": "L"}, {"id": "mL", "name": "mL"}],
+    },
+    {
+        "id": "LOADING_TYPE",
+        "name": "Tipo de carga",
+        "value_type": "list",
+        "values": [{"name": "Frontal"}, {"name": "Superior"}],
+    },
+    {
+        "id": "WASHING_MACHINE_TYPE",
+        "name": "Tipo de lavadora",
+        "value_type": "list",
+        "values": [{"name": "Automática"}, {"name": "Semi-automática"}],
+    },
+    {
+        "id": "COLOR",
+        "name": "Color",
+        "value_type": "string",
+        "values": [{"name": "Negro"}, {"name": "Gris"}, {"name": "Azul"}, {"name": "Azul oscuro"}],
+    },
+    {"id": "VOLTAGE", "name": "Voltaje", "value_type": "string", "values": [{"name": "110V"}]},
+    {
+        "id": "POWER_SUPPLY_TYPE",
+        "name": "Tipo de alimentación",
+        "value_type": "string",
+        "values": [{"name": "Batería"}, {"name": "Corriente doméstica"}],
+    },
+    {
+        "id": "FAN_TYPE",
+        "name": "Tipo de ventilador",
+        "value_type": "string",
+        "values": [{"name": "De torre"}, {"name": "De pared"}],
+    },
+]
+
+
+def _infer(name: str, specs: tuple[tuple[str, str], ...], ids: list[str]) -> dict[str, str]:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_APPLIANCE_ATTRIBUTES)
+
+    with _client(handler) as client:
+        found = category_lookup.infer_from_listing("MCO1", name, specs, ids, client=client)
+    return {a["id"]: a["value_name"] for a in found}
+
+
+def test_infer_reads_sizes_and_capacities_from_the_title() -> None:
+    ids = ["DISPLAY_SIZE", "WASHING_MACHINE_CAPACITY", "VOLUME_CAPACITY"]
+    assert _infer('TV LG 55" Pulgadas 139 Cm 55LX7BPSA', (), ids[:1]) == {"DISPLAY_SIZE": '55 "'}
+    assert _infer("Lavadora LG Carga Frontal 20 Kilos WM20", (), ids[1:2]) == {
+        "WASHING_MACHINE_CAPACITY": "20 kg"
+    }
+    assert _infer("Nevera LG No Frost 461 Litros GB45SPP", (), ids[2:]) == {
+        "VOLUME_CAPACITY": "461 L"
+    }
+
+
+def test_infer_washer_loading_and_type() -> None:
+    ids = ["LOADING_TYPE", "WASHING_MACHINE_TYPE"]
+    assert _infer("Lavadora LG Carga Frontal 20 Kilos", (), ids) == {
+        "LOADING_TYPE": "Frontal",
+        "WASHING_MACHINE_TYPE": "Automática",
+    }
+    assert _infer("Lavadora Acros SemiAutomatica Carga Superior 10KG", (), ids) == {
+        "LOADING_TYPE": "Superior",
+        "WASHING_MACHINE_TYPE": "Semi-automática",
+    }
+    # A top loader that doesn't say which: left missing, not guessed.
+    assert _infer("Lavadora KALLEY Carga Superior 16 Kilos", (), ids) == {
+        "LOADING_TYPE": "Superior"
+    }
+
+
+def test_infer_color_only_when_one_is_named() -> None:
+    assert _infer("Aspiradora Dreame E10 Negra", (), ["COLOR"]) == {"COLOR": "Negro"}
+    assert _infer("Lavadora LG", (("Color", 'Silver "Gris tipo acero"'),), ["COLOR"]) == {
+        "COLOR": "Gris"
+    }
+    assert _infer("Licuadora Azul oscuro", (), ["COLOR"]) == {"COLOR": "Azul oscuro"}
+    assert _infer("Aspiradora Powerspeed Gris/Azul", (), ["COLOR"]) == {}
+
+
+def test_infer_voltage_and_power_supply_from_where_we_buy() -> None:
+    assert _infer('TV LG 55"', (), ["VOLTAGE"]) == {"VOLTAGE": "110V"}
+    assert _infer("Secadora 220V", (), ["VOLTAGE"]) == {}
+    corded = (("Potencia", "1400 W"),)
+    assert _infer("Licuadora Ninja", corded, ["POWER_SUPPLY_TYPE"]) == {
+        "POWER_SUPPLY_TYPE": "Corriente doméstica"
+    }
+    assert _infer("Aspiradora Robot Xiaomi 2000 W", (), ["POWER_SUPPLY_TYPE"]) == {}
+    assert _infer("Licuadora Ninja", (), ["POWER_SUPPLY_TYPE"]) == {}
+
+
+def test_match_specifications_new_source_wordings() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_APPLIANCE_ATTRIBUTES)
+
+    specifications = (
+        ("Tamaño Pantalla", "65 Pulgadas"),
+        ("Tipo de Alimentacion de La lavadora", "Energía Eléctrica"),
+        ("Capacidad Carga Lavado", "22 Libras"),
+        ("Tipo de ventilador", "Torre"),
+    )
+    with _client(handler) as client:
+        matched = category_lookup.match_specifications("MCO1", specifications, client=client)
+    assert {a["id"]: a["value_name"] for a in matched} == {
+        "DISPLAY_SIZE": '65 "',
+        "POWER_SUPPLY_TYPE": "Corriente doméstica",
+        "WASHING_MACHINE_CAPACITY": "22 lb",
+        "FAN_TYPE": "De torre",
+    }
