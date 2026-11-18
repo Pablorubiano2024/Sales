@@ -74,6 +74,7 @@ from backend.app.core.config import get_settings  # noqa: E402
 from backend.app.core.database import SessionLocal, init_db  # noqa: E402
 from backend.app.core.logging import get_logger  # noqa: E402
 from backend.app.integrations.mercadolibre import MercadoLibreAdapter  # noqa: E402
+from backend.app.integrations.rate_limit import RetryOn429Transport  # noqa: E402
 from backend.app.models.analytics import AnalyticsEvent, AnalyticsEventType  # noqa: E402
 from backend.app.models.lifecycle import LifecycleStage, OpportunityLifecycleEvent  # noqa: E402
 from backend.app.models.listing_draft import ListingDraft, ListingDraftStatus  # noqa: E402
@@ -158,7 +159,9 @@ def main() -> None:
         with (
             MercadoLibreAdapter(db) as ml_adapter,
             httpx.Client(
-                base_url=category_lookup.API_BASE_URL, timeout=category_lookup.DEFAULT_TIMEOUT
+                base_url=category_lookup.API_BASE_URL,
+                timeout=category_lookup.DEFAULT_TIMEOUT,
+                transport=RetryOn429Transport(),
             ) as ml_public_client,
         ):
             # Authenticate even in a dry run — computing the real,

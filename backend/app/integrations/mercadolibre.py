@@ -33,6 +33,7 @@ from backend.app.integrations.base import (
     MarketplaceListingInfo,
     MarketplaceOrderInfo,
 )
+from backend.app.integrations.rate_limit import RetryOn429Transport
 from backend.app.models.marketplace import Marketplace
 from backend.app.models.marketplace_credential import MarketplaceCredential
 
@@ -84,7 +85,9 @@ class MercadoLibreAdapter(MarketplaceAdapter):
     ) -> None:
         self._settings = get_settings()
         self._db = db
-        self._client = httpx.Client(base_url=base_url, timeout=timeout, transport=transport)
+        self._client = httpx.Client(
+            base_url=base_url, timeout=timeout, transport=RetryOn429Transport(transport)
+        )
         self._authenticated = False
         self._access_token: str | None = None
         self._user_id: int | None = None
