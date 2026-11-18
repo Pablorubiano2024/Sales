@@ -267,6 +267,43 @@ def test_generate_draft_still_blocks_a_real_gtin_requirement(db_session: Session
     assert isinstance(result, DraftGenerationError)
 
 
+def test_generate_draft_uses_the_barcode_the_source_reports(db_session: Session) -> None:
+    """VTEX brand stores report each item's EAN (2026-11-18): a required
+    GTIN is filled with it when its check digit is valid."""
+    opportunity = _make_opportunity(db_session)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/sites/MCO/domain_discovery/search":
+            return httpx.Response(
+                200, json=[{"category_id": "MCO14903", "category_name": "Televisores"}]
+            )
+        if request.url.path == "/categories/MCO14903/attributes":
+            return httpx.Response(
+                200,
+                json=[
+                    {"id": "BRAND", "tags": {"required": True}},
+                    {"id": "MODEL", "tags": {"required": True}},
+                    {"id": "GTIN", "tags": {"multivalued": True, "conditional_required": True}},
+                ],
+            )
+        if request.url.path == "/categories/MCO14903/attributes/conditional":
+            return httpx.Response(200, json={"required_attributes": [{"id": "GTIN"}]})
+        raise AssertionError(f"unexpected request: {request.url}")
+
+    with _client(handler) as client:
+        valid = generate_draft(
+            db_session, opportunity, _live(gtin="7704353462319"), ml_public_client=client
+        )
+        assert not isinstance(valid, DraftGenerationError)
+        assert {"id": "GTIN", "value_name": "7704353462319"} in json.loads(valid.attributes)[
+            "extra"
+        ]
+        bad = generate_draft(
+            db_session, opportunity, _live(gtin="7704353462310"), ml_public_client=client
+        )
+        assert isinstance(bad, DraftGenerationError)
+
+
 def test_generate_draft_allows_a_category_when_gtin_not_really_required_for_this_brand(
     db_session: Session,
 ) -> None:

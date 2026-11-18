@@ -44,7 +44,13 @@ from backend.app.integrations.falabella_source import (
     FalabellaSourceAdapter,
     HomecenterSourceAdapter,
 )
-from backend.app.integrations.imusa_source import ImusaSourceAdapter, JumboSourceAdapter
+from backend.app.integrations.imusa_source import (
+    ElectroluxSourceAdapter,
+    HacebSourceAdapter,
+    ImusaSourceAdapter,
+    JumboSourceAdapter,
+    SonySourceAdapter,
+)
 from backend.app.integrations.tecnologiamayorista_source import (
     TecnologiaMayoristaSourceAdapter,
 )
@@ -73,6 +79,9 @@ SUPPORTED_SOURCES: dict[str, type[SourceAdapter]] = {
     "Alkosto Colombia": AlkostoSourceAdapter,
     "Ktronix Colombia": KtronixSourceAdapter,
     "Tecnologia Mayorista": TecnologiaMayoristaSourceAdapter,
+    "Sony Store Colombia": SonySourceAdapter,
+    "Electrolux Colombia": ElectroluxSourceAdapter,
+    "Haceb Colombia": HacebSourceAdapter,
 }
 
 
@@ -216,8 +225,17 @@ def generate_draft(
             extra_attributes = [*extra_attributes, {"id": "GTIN", "value_name": real_gtin}]
             covered_attribute_ids = covered_attribute_ids | {"GTIN"}
 
-    # Some sources' own product code IS the real barcode (Alkosto/Ktronix
+    # The barcode the source itself reports (VTEX stores' item EAN), or a
+    # source whose own product code IS the barcode (Alkosto/Ktronix
     # EAN-13s) — used only when its check digit is valid.
+    if (
+        "GTIN" in required_now
+        and "GTIN" not in covered_attribute_ids
+        and live.gtin
+        and category_lookup.is_valid_gtin(live.gtin)
+    ):
+        extra_attributes = [*extra_attributes, {"id": "GTIN", "value_name": live.gtin}]
+        covered_attribute_ids = covered_attribute_ids | {"GTIN"}
     if "GTIN" in required_now and "GTIN" not in covered_attribute_ids:
         source = db.get(Source, opportunity.source_id)
         adapter_cls = SUPPORTED_SOURCES.get(source.name if source else "")

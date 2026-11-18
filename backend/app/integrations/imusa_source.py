@@ -30,6 +30,7 @@ Checked before writing this (Imusa 2026-09-25, Jumbo added same day):
 
 from __future__ import annotations
 
+from dataclasses import replace
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -72,6 +73,15 @@ def _to_decimal(value: Any) -> Decimal | None:
         return Decimal(str(value))
     except InvalidOperation:
         return None
+
+
+def _gtin(ean: Any) -> str | None:
+    """VTEX's item EAN; an 11-digit one is a UPC-A missing its leading 0
+    (Sony: "27242925502")."""
+    code = str(ean or "").strip()
+    if not code.isdigit():
+        return None
+    return code.zfill(12) if len(code) == 11 else code
 
 
 class ImusaSourceAdapter(SourceAdapter):
@@ -147,6 +157,7 @@ class ImusaSourceAdapter(SourceAdapter):
             image_urls=image_urls,
             brand=p.get("brand") or None,
             specifications=tuple(specifications),
+            gtin=_gtin(item.get("ean")),
         )
 
     def _search(self, params: dict[str, str], limit: int = 20) -> list[SourceProductInfo]:
@@ -221,3 +232,49 @@ class JumboSourceAdapter(ImusaSourceAdapter):
         transport: httpx.BaseTransport | None = None,
     ) -> None:
         super().__init__(base_url=base_url, timeout=timeout, transport=transport)
+
+
+class _BrandStoreAdapter(ImusaSourceAdapter):
+    """A brand's own Colombian online store on the same classic VTEX search
+    API (user, 2026-11-18: buy straight from brands with promotions).
+    Checked 2026-11-18: robots.txt allows / and has no /api/ rule; the
+    search API returns price, list price, stock and each item's EAN."""
+
+    base_url = ""
+    #: The brand as MercadoLibre knows it, when the store reports its
+    #: company name instead (Haceb: "Industrias Haceb S.A.").
+    brand_name: str | None = None
+
+    def _parse_product(self, p: dict[str, Any]) -> SourceProductInfo | None:
+        info = super()._parse_product(p)
+        if info is None or self.brand_name is None or info.brand is None:
+            return info
+        if self.brand_name.lower() in info.brand.lower():
+            return replace(info, brand=self.brand_name)
+        return info
+
+    def __init__(
+        self,
+        base_url: str | None = None,
+        timeout: float = DEFAULT_TIMEOUT,
+        transport: httpx.BaseTransport | None = None,
+    ) -> None:
+        super().__init__(base_url=base_url or self.base_url, timeout=timeout, transport=transport)
+
+
+class SonySourceAdapter(_BrandStoreAdapter):
+    """store.sony.com.co (answers gzip-compressed; httpx decodes it)."""
+
+    source_label = "Sony"
+    base_url = "https://store.sony.com.co"
+
+
+class ElectroluxSourceAdapter(_BrandStoreAdapter):
+    source_label = "Electrolux"
+    base_url = "https://www.electrolux.com.co"
+
+
+class HacebSourceAdapter(_BrandStoreAdapter):
+    source_label = "Haceb"
+    base_url = "https://www.haceb.com"
+    brand_name = "Haceb"

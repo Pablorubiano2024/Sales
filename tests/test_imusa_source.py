@@ -9,7 +9,12 @@ from decimal import Decimal
 
 import httpx
 
-from backend.app.integrations.imusa_source import ImusaSourceAdapter, JumboSourceAdapter
+from backend.app.integrations.imusa_source import (
+    HacebSourceAdapter,
+    ImusaSourceAdapter,
+    JumboSourceAdapter,
+    SonySourceAdapter,
+)
 
 PRODUCT = {
     "productId": "1585",
@@ -201,3 +206,48 @@ def test_jumbo_adapter_defaults_to_the_real_jumbo_base_url() -> None:
     adapter = JumboSourceAdapter(transport=httpx.MockTransport(lambda r: httpx.Response(500)))
     assert str(adapter._client.base_url) == "https://www.jumbocolombia.com"  # noqa: SLF001
     assert adapter.source_label == "Jumbo"
+
+
+def _with_item(**changes: object) -> dict:
+    item = {**PRODUCT["items"][0], **changes}
+    return {**PRODUCT, "items": [item]}
+
+
+def test_parses_the_item_ean_as_gtin() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=[_with_item(ean="7704353462319")])
+
+    with _adapter(handler) as adapter:
+        assert adapter.search_products("x")[0].gtin == "7704353462319"
+
+
+def test_eleven_digit_ean_is_a_upc_missing_its_leading_zero() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=[_with_item(ean="27242925502")])
+
+    with SonySourceAdapter(transport=httpx.MockTransport(handler)) as adapter:
+        product = adapter.search_products("audifonos")[0]
+    assert product.gtin == "027242925502"
+
+
+def test_no_ean_means_no_gtin() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=[PRODUCT])
+
+    with _adapter(handler) as adapter:
+        assert adapter.search_products("x")[0].gtin is None
+
+
+def test_brand_stores_point_at_their_own_site() -> None:
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.host)
+        return httpx.Response(200, json=[{**PRODUCT, "brand": "Industrias Haceb S.A."}])
+
+    with SonySourceAdapter(transport=httpx.MockTransport(handler)) as sony:
+        sony.search_products("x")
+    with HacebSourceAdapter(transport=httpx.MockTransport(handler)) as haceb:
+        # The store reports its company name; MercadoLibre knows the brand.
+        assert haceb.search_products("x")[0].brand == "Haceb"
+    assert seen == ["store.sony.com.co", "www.haceb.com"]

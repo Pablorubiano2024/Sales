@@ -60,6 +60,9 @@ class SourceProductInfo:
     # MercadoLibre category attributes beyond BRAND/MODEL when a real
     # match exists (see category_lookup.match_specifications).
     specifications: tuple[tuple[str, str], ...] = ()
+    # The product's real barcode (EAN/UPC) when the source reports one
+    # (VTEX stores: items[].ean) — fills a required GTIN with real data.
+    gtin: str | None = None
 
 
 class SourceAdapter(ABC):

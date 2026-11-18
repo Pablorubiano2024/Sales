@@ -58,6 +58,10 @@ jobs:
             scripts: discover_imusa.py discover_jumbo.py
           - name: tecnologiamayorista
             scripts: discover_tecnologiamayorista.py
+          # Brands' own stores (2026-11-18). Electrolux also sells through
+          # Alkosto/Falabella, but its own store has its own product ids.
+          - name: brand-stores
+            scripts: discover_sony.py discover_electrolux.py discover_haceb.py
     name: discover (${{ matrix.group.name }})
     steps:
       - uses: actions/checkout@v4
