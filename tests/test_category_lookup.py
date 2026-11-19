@@ -588,6 +588,18 @@ _APPLIANCE_ATTRIBUTES = [
         "value_type": "string",
         "values": [{"name": "De torre"}, {"name": "De pared"}],
     },
+    {
+        "id": "IS_FACTORY_KIT",
+        "name": "Es kit",
+        "value_type": "boolean",
+        "values": [{"name": "No"}, {"name": "Sí"}],
+    },
+    {
+        "id": "CONNECTOR_TYPE",
+        "name": "Tipo de conector",
+        "value_type": "string",
+        "values": [{"name": "USB"}, {"name": "Micro-USB"}, {"name": "USB-C"}],
+    },
 ]
 
 
@@ -645,6 +657,21 @@ def test_infer_voltage_and_power_supply_from_where_we_buy() -> None:
     }
     assert _infer("Aspiradora Robot Xiaomi 2000 W", (), ["POWER_SUPPLY_TYPE"]) == {}
     assert _infer("Licuadora Ninja", (), ["POWER_SUPPLY_TYPE"]) == {}
+
+
+def test_infer_plug_in_devices_kits_and_usb_c() -> None:
+    power = ["POWER_SUPPLY_TYPE"]
+    assert _infer("Video beam Qxk Full Hd 1080p 7500 Lumens", (), power) == {
+        "POWER_SUPPLY_TYPE": "Corriente doméstica"
+    }
+    assert _infer("Proyector Portatil Freestyle", (), power) == {}
+    assert _infer("Mini Proyector con batería", (), power) == {}
+    kit = ["IS_FACTORY_KIT"]
+    assert _infer("Kit de Micrófonos Inalámbricos Creators", (), kit) == {"IS_FACTORY_KIT": "Sí"}
+    assert _infer("Micrófono Inalámbrico Solapa", (), kit) == {}
+    usb = ["CONNECTOR_TYPE"]
+    assert _infer("Power Bank 20000mAh Carga Rápida USB-C", (), usb) == {"CONNECTOR_TYPE": "USB-C"}
+    assert _infer("Power Bank USB-C y Micro USB", (), usb) == {}
 
 
 def test_match_specifications_new_source_wordings() -> None:

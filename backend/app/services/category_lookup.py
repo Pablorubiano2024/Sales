@@ -507,6 +507,12 @@ _TITLE_NUMBER_UNIT: dict[str, re.Pattern[str]] = {
 }
 _FEMININE_COLORS = {"negra": "negro", "blanca": "blanco", "roja": "rojo", "amarilla": "amarillo"}
 _BATTERY_WORDS = ("bateria", "inalambric", "recargable", "robot")
+# Devices that only run plugged in, named in the title (7 Falabella
+# projectors blocked on POWER_SUPPLY_TYPE, 2026-11-19, none with a "NNN W").
+_MAINS_DEVICES = re.compile(
+    r"\b(proyector|video ?beam|nevera|nevecon|refrigerador|microondas|horno|lavadora|secadora)\b"
+)
+_KIT_WORDS = re.compile(r"\b(kit|combo)\b")
 
 
 def _title_color(attr: dict[str, Any], text: str) -> str | None:
@@ -540,7 +546,10 @@ def infer_from_listing(
       - VOLTAGE "110V" for a product sold by a Colombian retailer for the
         Colombian 110-120 V grid, unless its title/specs mention 220 V;
       - POWER_SUPPLY_TYPE "Corriente doméstica" for a corded appliance (a
-        power rating in W, no battery/cordless/robot wording)."""
+        power rating in W, or a plug-in-only device such as a projector
+        named in the title; no battery/cordless/robot/portable wording).
+    Plus IS_FACTORY_KIT "Sí" for a "kit"/"combo" title, and CONNECTOR_TYPE
+    "USB-C" when that's the only connector named."""
     if not attribute_ids:
         return []
     attributes = {a["id"]: a for a in list_attributes(category_id, client=client)}
@@ -576,9 +585,19 @@ def infer_from_listing(
             if "220" not in norm:
                 value = _match_bounded_value(attr, "110V")
         elif attr_id == "POWER_SUPPLY_TYPE":
-            corded = re.search(r"\b\d{3,4}\s*(?:w|watts?)\b", norm)
-            if corded and not any(w in norm for w in _BATTERY_WORDS):
+            corded = re.search(r"\b\d{3,4}\s*(?:w|watts?)\b", norm) or _MAINS_DEVICES.search(
+                _normalize(name)
+            )
+            if corded and not any(w in norm for w in (*_BATTERY_WORDS, "portatil")):
                 value = _match_bounded_value(attr, "Corriente doméstica")
+        elif attr_id == "IS_FACTORY_KIT":
+            # Only the positive: a title without "kit"/"combo" may still be one.
+            if _KIT_WORDS.search(_normalize(name)):
+                value = _match_bounded_value(attr, "Sí")
+        elif attr_id == "CONNECTOR_TYPE":
+            usb_c = re.search(r"\busb[\s-]?c\b|\btipo[\s-]?c\b", norm)
+            if usb_c and "micro" not in norm and not re.search(r"\busb[\s-]?a\b", norm):
+                value = _match_bounded_value(attr, "USB-C")
         if value is not None and (attr.get("values") or attr_id in _TITLE_NUMBER_UNIT):
             out.append({"id": attr_id, "value_name": value})
     return out
