@@ -60,6 +60,7 @@ from __future__ import annotations
 
 import sys
 import time
+from datetime import date
 from decimal import Decimal
 from functools import cache, partial
 from pathlib import Path
@@ -116,6 +117,22 @@ LISTING_TYPE_ID = "gold_special"
 # confirmed live 2026-09-22, see the retry loop below.
 RATE_LIMIT_BACKOFF_SECONDS = 30
 MAX_RATE_LIMIT_RETRIES = 3
+
+# Pilot (user, 2026-11-19): lesser-known products that no other seller
+# lists on MercadoLibre go up at the minimum profitable price instead of
+# being skipped for having no competitor to price against. Both sales so
+# far were non-mainstream earbuds. Only these, only until PILOT_UNTIL: if
+# none sells by then, pause them and remove this.
+PILOT_WITHOUT_COMPETITORS = {
+    "FAL-122867765",  # Proyector con WiFi 7500
+    "FAL-125366669",  # Video beam Qxk Full HD
+    "FAL-130048141",  # Proyector TMY 1080P
+    "FAL-144766543",  # Mini proyector Hy-320
+    "FAL-122933419",  # Masajeador percutor Neo Sens + báscula
+    "FAL-157732818",  # Secador Dreame Hair Glory Mix
+    "FAL-158377943",  # Combo alisadora + secador Remington Wet2straight
+}
+PILOT_UNTIL = date(2026, 12, 3)
 
 
 def _fee_for(
@@ -266,6 +283,8 @@ def main() -> None:
                         finder=find_catalog,
                     ),
                     launch_mode=launch_mode,
+                    without_competitors=product.sku in PILOT_WITHOUT_COMPETITORS
+                    and date.today() <= PILOT_UNTIL,
                 )
                 if decision.price is None:
                     print(f"SKIP  {label}: {decision.reason}")

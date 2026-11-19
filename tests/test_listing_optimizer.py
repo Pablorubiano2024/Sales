@@ -332,3 +332,14 @@ def test_catalog_rescue_needs_a_competitive_profitable_verified_product() -> Non
     assert catalog_rescue_blocker(pause, floor, floor, can_opt_in=True)
     assert catalog_rescue_blocker(price, floor - 1, floor, can_opt_in=True)
     assert catalog_rescue_blocker(price, floor, floor, can_opt_in=False)
+
+
+def test_publish_price_without_competitors_only_for_the_pilot() -> None:
+    assert decide_publish_price(D("400000"), None, launch_mode=False).action == "skip"
+    decision = decide_publish_price(D("400000"), None, launch_mode=False, without_competitors=True)
+    assert (decision.action, decision.price) == ("price", D("400000"))
+    # A real competitor still decides the price, pilot or not.
+    cheaper = decide_publish_price(
+        D("400000"), [D("300000")], launch_mode=False, without_competitors=True
+    )
+    assert cheaper.action == "skip"

@@ -430,14 +430,24 @@ def find_market_prices(
 
 
 def decide_publish_price(
-    floor: Decimal, competitor_prices: list[Decimal] | None, *, launch_mode: bool
+    floor: Decimal,
+    competitor_prices: list[Decimal] | None,
+    *,
+    launch_mode: bool,
+    without_competitors: bool = False,
 ) -> PriceDecision:
     """Publish only at a price backed by real competitors: the listing's
     first price used to be the source's list price or a 1.8x estimate
     (2026-10-31: a TV bought at 4.1M would have gone up at 15M; the Hamilton
     Beach coffee maker went up at 790,900 and was paused against a 665,000
-    competitor). Same pricing as a live listing; action "skip" = no publish."""
+    competitor). Same pricing as a live listing; action "skip" = no publish.
+
+    `without_competitors`: a product nobody else sells goes up at the
+    minimum profitable price instead (the pilot in
+    publish_approved_opportunities.py)."""
     if not competitor_prices:
+        if without_competitors:
+            return PriceDecision("price", floor, "piloto sin competidor: precio mínimo rentable")
         return PriceDecision("skip", None, "sin precio real de competidores")
     decision = decide_price(floor, floor, competitor_prices, launch_mode=launch_mode)
     return decision if decision.action == "price" else PriceDecision("skip", None, decision.reason)
