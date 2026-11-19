@@ -170,13 +170,14 @@ def test_create_listing_posts_verified_payload_and_parses_response(
         assert payload["category_id"] == "MCO412060"
         assert payload["listing_type_id"] == "free"
         assert payload["currency_id"] == "COP"
-        assert payload["family_name"] == payload["title"]
+        assert payload["family_name"] == "Item de Prueba - Por favor, NO OFERTAR"
+        assert "title" not in payload
         assert {"id": "BRAND", "value_name": "Generic"} in payload["attributes"]
         return httpx.Response(
             201,
             json={
                 "id": "MCO123456789",
-                "title": payload["title"],
+                "title": payload["family_name"],
                 "price": payload["price"],
                 "currency_id": "COP",
                 "status": "active",
