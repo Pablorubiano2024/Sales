@@ -343,3 +343,20 @@ def test_publish_price_without_competitors_only_for_the_pilot() -> None:
         D("400000"), [D("300000")], launch_mode=False, without_competitors=True
     )
     assert cheaper.action == "skip"
+
+
+def test_minimum_profitable_price_can_also_clear_a_margin() -> None:
+    def fee(price: D) -> D:
+        return price * D("0.15")
+
+    def ship(_price: D) -> D:
+        return D("15000")
+
+    plain = minimum_profitable_price(D("300000"), D("0"), fee, ship, D("0.30"), D("20000"))
+    floor = minimum_profitable_price(
+        D("300000"), D("0"), fee, ship, D("0.30"), D("20000"), min_margin=D("0.20")
+    )
+    assert floor > plain
+    profit = floor - D("300000") - fee(floor) - D("15000")
+    assert profit / floor >= D("0.20")
+    assert profit >= D("90000")

@@ -141,14 +141,19 @@ def minimum_profitable_price(
     ship_for: Callable[[Decimal], Decimal],
     min_roi: Decimal,
     min_net: Decimal,
+    min_margin: Decimal = Decimal("0"),
 ) -> Decimal:
-    """Lowest "...900" price whose real net profit clears both thresholds.
+    """Lowest "...900" price whose real net profit clears both thresholds,
+    and `min_margin` of the price (publishing passes the Opportunity
+    Validator's 20%: at exactly 30% ROI the margin is ~19%, so every
+    product priced at its floor failed the validator, 2026-11-19).
     Fee and shipping depend on the price itself, so iterate upward until
     stable (both only grow with price, so this converges)."""
     needed = required_profit(buy, min_roi, min_net)
     price = round_price_up(buy + other_costs + needed)
     for _ in range(MAX_FLOOR_ITERATIONS):
-        candidate = round_price_up(buy + other_costs + needed + fee_for(price) + ship_for(price))
+        costs = buy + other_costs + fee_for(price) + ship_for(price)
+        candidate = round_price_up(max(costs + needed, costs / (1 - min_margin)))
         if candidate <= price:
             return price
         price = candidate

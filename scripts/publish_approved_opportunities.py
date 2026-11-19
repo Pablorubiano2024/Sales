@@ -100,7 +100,10 @@ from backend.app.services.listing_optimizer import (  # noqa: E402
     is_origin_opportunity,
     minimum_profitable_price,
 )
-from backend.app.services.opportunity_validator import validate_opportunity  # noqa: E402
+from backend.app.services.opportunity_validator import (  # noqa: E402
+    MIN_MARGIN,
+    validate_opportunity,
+)
 
 logger = get_logger(__name__)
 
@@ -272,6 +275,7 @@ def main() -> None:
                     partial(_fixed_cost, Decimal(opp.shipping_cost)),
                     settings.min_roi,
                     settings.min_net_profit,
+                    min_margin=MIN_MARGIN,
                 )
                 decision = decide_publish_price(
                     floor,
