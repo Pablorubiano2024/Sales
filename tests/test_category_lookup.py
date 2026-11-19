@@ -600,6 +600,19 @@ _APPLIANCE_ATTRIBUTES = [
         "value_type": "string",
         "values": [{"name": "USB"}, {"name": "Micro-USB"}, {"name": "USB-C"}],
     },
+    {"id": "PIECES_NUMBER", "name": "Cantidad de piezas", "value_type": "number"},
+    {
+        "id": "SURVEILLANCE_CAMERA_TYPE",
+        "name": "Tipo de cámara",
+        "value_type": "string",
+        "values": [{"name": "Domo"}, {"name": "IP"}],
+    },
+    {
+        "id": "CAMERA_LOCATIONS",
+        "name": "Ubicaciones",
+        "value_type": "string",
+        "values": [{"name": "Interior"}, {"name": "Exterior"}, {"name": "Interior/Exterior"}],
+    },
 ]
 
 
@@ -692,3 +705,17 @@ def test_match_specifications_new_source_wordings() -> None:
         "WASHING_MACHINE_CAPACITY": "22 lb",
         "FAN_TYPE": "De torre",
     }
+
+
+def test_infer_pieces_and_security_cameras() -> None:
+    pieces = ["PIECES_NUMBER"]
+    assert _infer("Tapo C210 Camara Wifi 2k X3 Unidades", (), pieces) == {"PIECES_NUMBER": "3"}
+    assert _infer("Set de 5 piezas", (), pieces) == {"PIECES_NUMBER": "5"}
+    assert _infer("Micrófono Lark M2 Combo", (), pieces) == {}
+    assert _infer("Proyector pantalla 200 x 50 cm", (), pieces) == {}
+    cam = ["SURVEILLANCE_CAMERA_TYPE", "CAMERA_LOCATIONS"]
+    assert _infer("Tapo C200 Cámara De Seguridad Wifi", (("Uso", "Interior"),), cam) == {
+        "SURVEILLANCE_CAMERA_TYPE": "IP",
+        "CAMERA_LOCATIONS": "Interior",
+    }
+    assert _infer("Cámara Domo Exterior", (), cam) == {"CAMERA_LOCATIONS": "Exterior"}

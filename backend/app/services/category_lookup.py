@@ -513,6 +513,11 @@ _MAINS_DEVICES = re.compile(
     r"\b(proyector|video ?beam|nevera|nevecon|refrigerador|microondas|horno|lavadora|secadora)\b"
 )
 _KIT_WORDS = re.compile(r"\b(kit|combo)\b")
+# "X3 Unidades", "x 2 und", "Set de 5 piezas" — a count the title states.
+_PIECES = re.compile(
+    # The unit word is required: "200 x 50 cm" is a size, not 50 pieces.
+    r"\b(?:x\s?)?(\d{1,2})\s*(?:unidades|unds?|piezas)\b"
+)
 
 
 def _title_color(attr: dict[str, Any], text: str) -> str | None:
@@ -548,8 +553,10 @@ def infer_from_listing(
       - POWER_SUPPLY_TYPE "Corriente doméstica" for a corded appliance (a
         power rating in W, or a plug-in-only device such as a projector
         named in the title; no battery/cordless/robot/portable wording).
-    Plus IS_FACTORY_KIT "Sí" for a "kit"/"combo" title, and CONNECTOR_TYPE
-    "USB-C" when that's the only connector named."""
+    Plus IS_FACTORY_KIT "Sí" for a "kit"/"combo" title, CONNECTOR_TYPE
+    "USB-C" when that's the only connector named, PIECES_NUMBER from a
+    count in the title ("X3 Unidades"), and for security cameras "IP" for a
+    Wi-Fi one and the indoor/outdoor use the text states."""
     if not attribute_ids:
         return []
     attributes = {a["id"]: a for a in list_attributes(category_id, client=client)}
@@ -594,10 +601,30 @@ def infer_from_listing(
             # Only the positive: a title without "kit"/"combo" may still be one.
             if _KIT_WORDS.search(_normalize(name)):
                 value = _match_bounded_value(attr, "Sí")
+        elif attr_id == "PIECES_NUMBER":
+            pieces = _PIECES.search(_normalize(name))
+            if pieces and int(n := pieces.group(1)) >= 1:
+                value = n
+        elif attr_id == "SURVEILLANCE_CAMERA_TYPE":
+            # A Wi-Fi camera streams over the network: an IP camera.
+            if re.search(r"\bwi-?fi\b", norm):
+                value = _match_bounded_value(attr, "IP")
+        elif attr_id == "CAMERA_LOCATIONS":
+            inside = re.search(r"\b(interior|interiores|indoor)\b", norm)
+            outside = re.search(r"\b(exterior|exteriores|outdoor)\b", norm)
+            if inside or outside:
+                option = (
+                    "Interior/Exterior"
+                    if inside and outside
+                    else ("Interior" if inside else "Exterior")
+                )
+                value = _match_bounded_value(attr, option)
         elif attr_id == "CONNECTOR_TYPE":
             usb_c = re.search(r"\busb[\s-]?c\b|\btipo[\s-]?c\b", norm)
             if usb_c and "micro" not in norm and not re.search(r"\busb[\s-]?a\b", norm):
                 value = _match_bounded_value(attr, "USB-C")
-        if value is not None and (attr.get("values") or attr_id in _TITLE_NUMBER_UNIT):
+        if value is not None and (
+            attr.get("values") or attr_id in _TITLE_NUMBER_UNIT or attr_id == "PIECES_NUMBER"
+        ):
             out.append({"id": attr_id, "value_name": value})
     return out

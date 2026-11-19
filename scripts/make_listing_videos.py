@@ -12,6 +12,8 @@ comes from the live item.
 ML's clips upload endpoint answers 403 for this account (verified
 2026-11-03; its docs cover only Global Selling items), so this only writes
 the files — upload them from the seller panel. Output: data/videos/<item>.mp4
+The daily publish workflow runs it for each new listing and posts the
+download link to Slack.
 
 Usage:
     python scripts/make_listing_videos.py                  # every active listing
@@ -54,8 +56,22 @@ def video_seconds(n_slides: int) -> float:
 
 
 MAX_PHOTOS = 6
-FONT_BOLD = "/System/Library/Fonts/Supplemental/Arial Bold.ttf"
-FONT_REGULAR = "/System/Library/Fonts/Supplemental/Arial.ttf"
+
+
+def _font(*candidates: str) -> str:
+    """The first font file present: macOS Arial locally, DejaVu on the
+    GitHub Actions Ubuntu runner (publish-marketplace-listings.yml)."""
+    return next((c for c in candidates if Path(c).exists()), candidates[-1])
+
+
+FONT_BOLD = _font(
+    "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+)
+FONT_REGULAR = _font(
+    "/System/Library/Fonts/Supplemental/Arial.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+)
 # Identifiers, not selling points.
 SKIP_ATTRIBUTES = {
     "BRAND",

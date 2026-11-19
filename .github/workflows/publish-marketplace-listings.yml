@@ -58,4 +58,49 @@ jobs:
           ML_CLIENT_ID: ${{ secrets.ML_CLIENT_ID }}
           ML_CLIENT_SECRET: ${{ secrets.ML_CLIENT_SECRET }}
           ML_REDIRECT_URI: ${{ secrets.ML_REDIRECT_URI }}
-        run: poetry run python scripts/publish_approved_opportunities.py --confirm
+        run: |
+          set -o pipefail
+          poetry run python scripts/publish_approved_opportunities.py --confirm | tee publish.log
+          ids=$(grep '^PUBLICADA ' publish.log | grep -oE ': MCO[0-9]+ ' | grep -oE 'MCO[0-9]+' | tr '\n' ' ' || true)
+          echo "NEW_ITEMS=$ids" >> "$GITHUB_ENV"
+
+      # A video for each new listing (ML flags listings without one as lower
+      # quality). ML's upload API answers 403 for this account, so the files
+      # go to the run's artifacts and Slack gets the link to upload them by
+      # hand (user, 2026-11-19).
+      - name: Make videos for new listings
+        if: env.NEW_ITEMS != ''
+        continue-on-error: true
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ML_CLIENT_ID: ${{ secrets.ML_CLIENT_ID }}
+          ML_CLIENT_SECRET: ${{ secrets.ML_CLIENT_SECRET }}
+          ML_REDIRECT_URI: ${{ secrets.ML_REDIRECT_URI }}
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg fonts-dejavu-core
+          poetry run python scripts/make_listing_videos.py $NEW_ITEMS
+
+      - name: Upload videos
+        id: videos
+        if: env.NEW_ITEMS != ''
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: videos
+          path: data/videos/*.mp4
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Tell Slack
+        if: env.NEW_ITEMS != '' && steps.videos.outputs.artifact-url != ''
+        continue-on-error: true
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_SALES_CHANNEL: ${{ secrets.SLACK_SALES_CHANNEL }}
+          ARTIFACT_URL: ${{ steps.videos.outputs.artifact-url }}
+        run: |
+          text=$(printf '🎬 *Videos para las publicaciones nuevas:* %s\nDescarga (14 días): %s\nSúbelos en MercadoLibre → Publicaciones → Video.' "$NEW_ITEMS" "$ARTIFACT_URL")
+          jq -n --arg c "$SLACK_SALES_CHANNEL" --arg t "$text" '{channel: $c, text: $t}' |
+            curl -sS -X POST https://slack.com/api/chat.postMessage \
+              -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+              -H "Content-Type: application/json; charset=utf-8" -d @- | jq -c '{ok, error}'
