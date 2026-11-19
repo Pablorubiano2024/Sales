@@ -269,6 +269,10 @@ class MercadoLibreAdapter(MarketplaceAdapter):
 
         payload: dict[str, Any] = {
             "title": title,
+            # The account is a "user_product_seller" (User Products model):
+            # since 2026-11-19 POST /items answers 400 body.required_fields
+            # without it. Earlier listings got it set from their title.
+            "family_name": title,
             "category_id": category_id,
             "price": price_value,
             "currency_id": currency,

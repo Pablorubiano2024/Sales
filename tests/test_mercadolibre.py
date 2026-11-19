@@ -170,6 +170,7 @@ def test_create_listing_posts_verified_payload_and_parses_response(
         assert payload["category_id"] == "MCO412060"
         assert payload["listing_type_id"] == "free"
         assert payload["currency_id"] == "COP"
+        assert payload["family_name"] == payload["title"]
         assert {"id": "BRAND", "value_name": "Generic"} in payload["attributes"]
         return httpx.Response(
             201,
