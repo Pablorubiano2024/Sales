@@ -47,6 +47,20 @@ QUERIES = [
     "licuadora",
     "freidora de aire",
     "smartwatch",
+    # Categories where lesser-known brands make up most of the results. Both
+    # sales so far were non-mainstream earbuds, and every famous-brand item
+    # loses to MercadoLibre's official stores on price (checked 2026-11-19:
+    # in these searches, no famous brand had more than 2 of the top 20).
+    "cargador inalambrico",
+    "power bank",
+    "humidificador",
+    "bascula digital",
+    "camara de seguridad",
+    "microfono inalambrico",
+    "proyector",
+    "masajeador",
+    "lampara led",
+    "secador de pelo",
 ]
 
 # Estimated domestic courier cost (Servientrega/Coordinadora/Interrapidísimo
