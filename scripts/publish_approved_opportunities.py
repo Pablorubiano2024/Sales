@@ -310,6 +310,7 @@ def main() -> None:
                 # A dry run must not save the re-pricing: at the launch-mode
                 # floor it re-grades the row PROMISING, dropping it from the
                 # next real run.
+                status_before = opp.status
                 opp = (
                     evaluate_opportunity(db, repriced)
                     if confirm
@@ -388,6 +389,12 @@ def main() -> None:
                         skipped += 1
                         break
                 if record is None:
+                    # Re-pricing at the floor re-grades the row PROMISING; a
+                    # failed publish must leave it where the next run looks
+                    # (2026-11-19: 9 rows fell out of "approved" after an
+                    # API error and the retry never saw them).
+                    opp.status = status_before
+                    db.commit()
                     continue
 
                 draft.status = ListingDraftStatus.PUBLISHED
