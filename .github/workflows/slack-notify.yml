@@ -1,0 +1,29 @@
+name: Slack notify
+
+# Posts one message to the sales Slack channel. The bot token lives only
+# in repo secrets, so local jobs (the video-upload task run from Claude
+# Code on the user's Mac) trigger this to report:
+#   gh workflow run slack-notify.yml -R Pablorubiano2024/Sales -f text="..."
+
+on:
+  workflow_dispatch:
+    inputs:
+      text:
+        description: Message text (Slack mrkdwn)
+        required: true
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post to Slack
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_SALES_CHANNEL: ${{ secrets.SLACK_SALES_CHANNEL }}
+          TEXT: ${{ inputs.text }}
+        run: |
+          jq -n --arg c "$SLACK_SALES_CHANNEL" --arg t "$TEXT" '{channel: $c, text: $t}' |
+            curl -sS -X POST https://slack.com/api/chat.postMessage \
+              -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+              -H "Content-Type: application/json; charset=utf-8" -d @- |
+            jq -e '.ok' > /dev/null
