@@ -55,19 +55,41 @@ EXPIRY_SAFETY_MARGIN = timedelta(minutes=5)
 HANDLING_TIME = "3 días"
 
 
-def with_handling_time(sale_terms: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
-    """`sale_terms` with MANUFACTURING_TIME set to HANDLING_TIME (others
-    kept), or None if it's already set that way."""
+# Every item's warranty. Without one buyers ask before buying (first
+# question, 2026-11-23); the user chose 12 months from the maker, the
+# usual term for new electronics and Colombia's legal minimum (Ley 1480).
+WARRANTY = "12 meses de garantía de fábrica"
+
+# The sale terms every listing carries: id -> the term as sent to ML.
+STANDARD_TERMS: dict[str, dict[str, str]] = {
+    "MANUFACTURING_TIME": {"id": "MANUFACTURING_TIME", "value_name": HANDLING_TIME},
+    "WARRANTY_TYPE": {"id": "WARRANTY_TYPE", "value_id": "2230279"},  # Garantía de fábrica
+    "WARRANTY_TIME": {"id": "WARRANTY_TIME", "value_name": "12 meses"},
+}
+
+
+def _term_matches(current: dict[str, Any], wanted: dict[str, str]) -> bool:
+    if "value_id" in wanted:
+        return str(current.get("value_id")) == wanted["value_id"]
+    return current.get("value_name") == wanted["value_name"]
+
+
+def with_standard_terms(sale_terms: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
+    """`sale_terms` with STANDARD_TERMS set (others kept), or None if
+    they're all already set that way."""
     terms = list(sale_terms or [])
-    for term in terms:
-        if term.get("id") == "MANUFACTURING_TIME" and term.get("value_name") == HANDLING_TIME:
-            return None
+    current = {t.get("id"): t for t in terms}
+    if all(
+        term_id in current and _term_matches(current[term_id], wanted)
+        for term_id, wanted in STANDARD_TERMS.items()
+    ):
+        return None
     others = [
         {"id": t["id"], "value_name": t["value_name"]}
         for t in terms
-        if t.get("id") != "MANUFACTURING_TIME" and t.get("value_name")
+        if t.get("id") not in STANDARD_TERMS and t.get("value_name")
     ]
-    return [*others, {"id": "MANUFACTURING_TIME", "value_name": HANDLING_TIME}]
+    return [*others, *(dict(term) for term in STANDARD_TERMS.values())]
 
 
 class MercadoLibreAdapter(MarketplaceAdapter):
@@ -286,7 +308,7 @@ class MercadoLibreAdapter(MarketplaceAdapter):
                 {"id": "MODEL", "value_name": model},
                 *(extra_attributes or []),
             ],
-            "sale_terms": with_handling_time(None),
+            "sale_terms": with_standard_terms(None),
         }
         if pictures:
             payload["pictures"] = [{"source": url} for url in pictures]

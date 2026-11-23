@@ -92,8 +92,9 @@ from backend.app.core.logging import get_logger
 from backend.app.core.time import utcnow
 from backend.app.integrations.mercadolibre import (
     HANDLING_TIME,
+    WARRANTY,
     MercadoLibreAdapter,
-    with_handling_time,
+    with_standard_terms,
 )
 from backend.app.jobs.discovery import build_sku
 from backend.app.models.marketplace import ListingCatalogMatch, ListingStatus, MarketplaceProduct
@@ -522,9 +523,9 @@ def optimize_listing(
         result.skipped = f"estado real '{item.get('status')}'"
         return result
     is_paused = item["status"] == "paused"
-    sale_terms = with_handling_time(item.get("sale_terms"))
+    sale_terms = with_standard_terms(item.get("sale_terms"))
     if sale_terms is not None:
-        result.actions.append(f"tiempo de disponibilidad {HANDLING_TIME}")
+        result.actions.append(f"tiempo de disponibilidad {HANDLING_TIME}, {WARRANTY}")
         if apply:
             ml.update_listing(listing.external_id, sale_terms=sale_terms)
     keys = listing_keys(listing.product_id, item)

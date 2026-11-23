@@ -433,15 +433,34 @@ def test_get_orders_handles_missing_item_gracefully(
     assert orders[0].item_external_id is None
 
 
-def test_with_handling_time_sets_it_once_and_keeps_other_terms() -> None:
-    from backend.app.integrations.mercadolibre import HANDLING_TIME, with_handling_time
+def test_with_standard_terms_sets_them_once_and_keeps_other_terms() -> None:
+    from backend.app.integrations.mercadolibre import HANDLING_TIME, with_standard_terms
 
-    warranty = {"id": "WARRANTY_TIME", "value_name": "6 meses", "values": []}
-    assert with_handling_time([warranty, {"id": "MANUFACTURING_TIME", "value_name": "1 días"}]) == [
-        {"id": "WARRANTY_TIME", "value_name": "6 meses"},
+    invoice = {"id": "INVOICE", "value_name": "Factura A", "values": []}
+    terms = with_standard_terms([invoice, {"id": "MANUFACTURING_TIME", "value_name": "1 días"}])
+    assert terms == [
+        {"id": "INVOICE", "value_name": "Factura A"},
         {"id": "MANUFACTURING_TIME", "value_name": HANDLING_TIME},
+        {"id": "WARRANTY_TYPE", "value_id": "2230279"},
+        {"id": "WARRANTY_TIME", "value_name": "12 meses"},
     ]
-    assert with_handling_time([{"id": "MANUFACTURING_TIME", "value_name": HANDLING_TIME}]) is None
+    # An old 6-month warranty is replaced, not kept beside the new one.
+    six = with_standard_terms([{"id": "WARRANTY_TIME", "value_name": "6 meses"}])
+    assert six is not None
+    assert [t for t in six if t["id"] == "WARRANTY_TIME"] == [
+        {"id": "WARRANTY_TIME", "value_name": "12 meses"}
+    ]
+    # As ML returns them once set: nothing to change.
+    assert (
+        with_standard_terms(
+            [
+                {"id": "MANUFACTURING_TIME", "value_name": HANDLING_TIME},
+                {"id": "WARRANTY_TYPE", "value_id": "2230279", "value_name": "Garantía de fábrica"},
+                {"id": "WARRANTY_TIME", "value_name": "12 meses"},
+            ]
+        )
+        is None
+    )
 
 
 def test_unanswered_questions_skip_ones_the_buyer_deleted(
