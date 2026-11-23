@@ -442,3 +442,30 @@ def test_with_handling_time_sets_it_once_and_keeps_other_terms() -> None:
         {"id": "MANUFACTURING_TIME", "value_name": HANDLING_TIME},
     ]
     assert with_handling_time([{"id": "MANUFACTURING_TIME", "value_name": HANDLING_TIME}]) is None
+
+
+def test_unanswered_questions_skip_ones_the_buyer_deleted(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(ml_module, "get_settings", lambda: FAKE_SETTINGS)
+    _make_credential(db_session, expires_in=timedelta(hours=5))
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/users/me":
+            return httpx.Response(200, json={"id": 123456, "nickname": "TEST"})
+        assert request.url.path == "/my/received_questions/search"
+        return httpx.Response(
+            200,
+            json={
+                "questions": [
+                    {"id": 1, "text": "¿Tiene garantía?", "deleted_from_listing": True},
+                    {"id": 2, "text": "¿Hay stock?", "deleted_from_listing": False},
+                ]
+            },
+        )
+
+    with MercadoLibreAdapter(db_session, transport=httpx.MockTransport(handler)) as adapter:
+        assert adapter.authenticate() is True
+        questions = adapter.get_unanswered_questions()
+    assert questions is not None
+    assert [q["id"] for q in questions] == [2]

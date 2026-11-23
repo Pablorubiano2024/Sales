@@ -480,7 +480,9 @@ class MercadoLibreAdapter(MarketplaceAdapter):
             logger.warning("received_questions failed: %s", response.text)
             return None
         questions: list[dict[str, Any]] = response.json().get("questions") or []
-        return questions
+        # A question the buyer deleted stays UNANSWERED in the search but
+        # can't be answered any more (seen 2026-11-23), so it isn't pending.
+        return [q for q in questions if not q.get("deleted_from_listing")]
 
     def get_catalog_product(self, catalog_product_id: str) -> dict[str, Any] | None:
         """GET /products/{id} — the catalog product's own name/attributes."""
