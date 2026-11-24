@@ -395,6 +395,8 @@ def test_generate_draft_covers_gtin_with_a_real_catalog_value(db_session: Sessio
             return httpx.Response(
                 200, json=[{"listing_type_id": "gold_special", "sale_fee_amount": 0}]
             )
+        if request.url.path == "/categories/MCO11860/shipping_preferences":
+            return _PACKAGE_RESPONSE
         raise AssertionError(f"unexpected request: {request.url}")
 
     with _client(handler) as ml_public_client:
@@ -598,3 +600,72 @@ def test_generate_draft_stays_blocked_without_an_identical_catalog_product(
     assert none_found.reason.endswith("COLOR, VOLTAGE")
     assert isinstance(partly, DraftGenerationError)
     assert partly.reason.endswith(": COLOR")
+
+
+_PACKAGE_RESPONSE = httpx.Response(
+    200, json={"dimensions": {"height": 5, "width": 11, "length": 11, "weight": 500}}
+)
+
+
+def _package_handler(dimensions):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/sites/MCO/domain_discovery/search":
+            return httpx.Response(
+                200, json=[{"category_id": "MCO3697", "category_name": "Audífonos"}]
+            )
+        if request.url.path == "/categories/MCO3697/attributes":
+            return httpx.Response(
+                200,
+                json=[
+                    {"id": "BRAND", "tags": {"required": True}},
+                    {"id": "MODEL", "tags": {"required": True}},
+                ],
+            )
+        if request.url.path == "/categories/MCO3697/shipping_preferences":
+            assert request.headers["Authorization"] == "Bearer tok123"
+            return httpx.Response(200, json={"dimensions": dimensions})
+        if request.url.path == "/sites/MCO/listing_prices":
+            return httpx.Response(
+                200, json=[{"listing_type_id": "gold_special", "sale_fee_amount": 0}]
+            )
+        raise AssertionError(f"unexpected request: {request.url}")
+
+    return handler
+
+
+def test_generate_draft_adds_the_category_package_dimensions(db_session: Session) -> None:
+    """2026-11-24: MercadoLibre rejects every new item without
+    SELLER_PACKAGE_* ("item.attribute.missing.seller.package.dimensions");
+    the category's own typical package fills them."""
+    opportunity = _make_opportunity(db_session)
+    handler = _package_handler({"height": 5, "width": 11, "length": 11.5, "weight": 500})
+    with _client(handler) as ml_public_client:
+        result = generate_draft(
+            db_session,
+            opportunity,
+            _live(name="Audífonos Klip Xtreme ZoundTune"),
+            ml_public_client=ml_public_client,
+            access_token="tok123",
+        )
+
+    assert isinstance(result, ListingDraft)
+    extra = json.loads(result.attributes or "{}")["extra"]
+    assert {"id": "SELLER_PACKAGE_HEIGHT", "value_name": "5 cm"} in extra
+    assert {"id": "SELLER_PACKAGE_WIDTH", "value_name": "11 cm"} in extra
+    assert {"id": "SELLER_PACKAGE_LENGTH", "value_name": "11.5 cm"} in extra
+    assert {"id": "SELLER_PACKAGE_WEIGHT", "value_name": "500 g"} in extra
+
+
+def test_generate_draft_skips_when_the_category_has_no_package(db_session: Session) -> None:
+    opportunity = _make_opportunity(db_session)
+    with _client(_package_handler(None)) as ml_public_client:
+        result = generate_draft(
+            db_session,
+            opportunity,
+            _live(name="Audífonos Klip Xtreme ZoundTune"),
+            ml_public_client=ml_public_client,
+            access_token="tok123",
+        )
+
+    assert isinstance(result, DraftGenerationError)
+    assert "medidas de paquete" in result.reason

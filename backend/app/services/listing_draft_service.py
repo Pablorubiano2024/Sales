@@ -282,6 +282,27 @@ def generate_draft(
             f"automáticamente: {', '.join(missing)}"
         )
 
+    # Required on every new item since 2026-11-24 (see
+    # category_lookup.get_package_attributes). Needs auth, so only when a
+    # token is given, which is how every real publish runs.
+    have = {a["id"] for a in extra_attributes}
+    if access_token is not None and not set(category_lookup.SELLER_PACKAGE_ATTRIBUTE_IDS) <= have:
+        package = category_lookup.get_package_attributes(
+            category_id, client=ml_public_client, access_token=access_token
+        )
+        if package is None:
+            return DraftGenerationError(
+                f"Categoría {category_id}: MercadoLibre no dio medidas de paquete"
+            )
+        extra_attributes = [
+            *(
+                a
+                for a in extra_attributes
+                if a["id"] not in category_lookup.SELLER_PACKAGE_ATTRIBUTE_IDS
+            ),
+            *package,
+        ]
+
     specs = live.specifications[:MAX_DESCRIPTION_SPECS]
     bullets = [f"{name}: {value}" for name, value in specs[:6]]
     description = "\n".join(

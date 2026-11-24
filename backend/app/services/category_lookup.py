@@ -289,6 +289,49 @@ def get_sale_commission_pct(
     return (Decimal(str(sale_fee)) / price).quantize(Decimal("0.0001"))
 
 
+# The package attributes MercadoLibre began rejecting POST /items without
+# on 2026-11-24 ("item.attribute.missing.seller.package.dimensions"), in
+# the units the category accepts (cm and g).
+SELLER_PACKAGE_ATTRIBUTE_IDS = (
+    "SELLER_PACKAGE_HEIGHT",
+    "SELLER_PACKAGE_WIDTH",
+    "SELLER_PACKAGE_LENGTH",
+    "SELLER_PACKAGE_WEIGHT",
+)
+
+
+def get_package_attributes(
+    category_id: str, *, client: httpx.Client, access_token: str
+) -> list[dict[str, str]] | None:
+    """The category's typical package from MercadoLibre itself
+    (GET /categories/{id}/shipping_preferences, auth required), as
+    SELLER_PACKAGE_* attributes. Neither the source stores nor the catalog
+    products state a package size (only the product's own size, checked
+    2026-11-24), so this is the only real figure available; MercadoLibre
+    re-measures the package when it's dropped off. None if the lookup
+    fails or the category has no dimensions."""
+    try:
+        response = client.get(
+            f"/categories/{category_id}/shipping_preferences",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        response.raise_for_status()
+        dims = response.json().get("dimensions")
+    except (httpx.HTTPError, ValueError) as exc:
+        logger.warning("shipping_preferences(category=%s) failed: %s", category_id, exc)
+        return None
+    if not isinstance(dims, dict):
+        return None
+    values = [dims.get(k) for k in ("height", "width", "length", "weight")]
+    if not all(isinstance(v, (int, float)) and v > 0 for v in values):
+        return None
+    units = ("cm", "cm", "cm", "g")
+    return [
+        {"id": attr_id, "value_name": f"{value:g} {unit}"}
+        for attr_id, value, unit in zip(SELLER_PACKAGE_ATTRIBUTE_IDS, values, units, strict=True)
+    ]
+
+
 def _normalize(name: str) -> str:
     """Case/accent-insensitive comparison key ("Tamaño" == "tamano")."""
     stripped = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode("ascii")
