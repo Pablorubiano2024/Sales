@@ -61,6 +61,9 @@ QUERIES = [
     "masajeador",
     "lampara led",
     "secador de pelo",
+    # Brand of both sales so far (RB-EB130 earbuds). Falabella also sells
+    # its headphones and speaker, which no other query found (2026-11-23).
+    "red bull racing",
 ]
 
 # Estimated domestic courier cost (Servientrega/Coordinadora/Interrapidísimo
