@@ -137,6 +137,57 @@ PILOT_WITHOUT_COMPETITORS = {
 }
 PILOT_UNTIL = date(2026, 12, 3)
 
+# Second batch (user, 2026-11-24): since 2026-11-23 MercadoLibre answers
+# 403 PolicyAgent on GET /products/{id}/items for every catalog product
+# (re-authorizing didn't help), so no product has competitor prices and
+# nothing new could be published. These 40 go up at the minimum profitable
+# price anyway: the best ROI among the approved rows that pass every other
+# check (dry run on 2026-11-24), minus two that would duplicate a live
+# listing (Imusa Infiny Force from Ktronix, LG XBOOM Rock Rojo). Same end
+# date and review as the first pilot.
+PILOT_WITHOUT_COMPETITORS |= {
+    "IMU-432",  # Accesorios para Freidora IMUSA Easy Fry
+    "ALK-7701023115827",  # Licuadora KALLEY K-LPV40 Blanco
+    "FAL-73560515",  # Audifonos bluetooth Klip Xtreme ZoundTune
+    "FAL-72944975",  # Rizador del Pelo Gama Keration Cerámica 220 °C
+    "ALK-5025232965809",  # Audífonos PANASONIC Inalámbricos Bluetooth In Ear TWS
+    "HOM-119413784",  # Ventilador de Pared Recco 40cm, 3 Velocidades Blanco RW
+    "HOM-118663093",  # Licuadora 2.2 Lts 10 Velocidades InfinyforceXL Negro
+    "SON-2558",  # PS5 MARVEL Tokon: Fighting Souls
+    "ALK-7705946478380",  # Audífonos de Diadema KALLEY Inalámbricos Bluetooth Ov
+    "ALK-7705946478373",  # Audífonos de Diadema KALLEY Inalámbricos Bluetooth Ov
+    "FAL-158658503",  # Audifonos Jbl Tune 500 Negro
+    "SON-2411",  # PS5 Ghost of Yotei
+    "FAL-158931840",  # Audífonos Diadema  Auricular Inalámbrico JBL Tune 730
+    "KTR-8806096734162",  # Parlante LG XBOOM Mini Gris 5W
+    "FAL-73397254",  # Audífonos de diadema bluetooth Oracle Red Bull Racing
+    "FAL-73397252",  # Parlante Bluetooth Oracle Red Bull Racing
+    "FAL-73324058",  # Audífonos JBL Bluetooth JBLWBUDS2BLK
+    "JUM-20133766",  # Licuadora Multifuncion Sopas y Batidos en Minutos
+    "KTR-7705946885140",  # Aspiradora KALLEY K-VCR Azul
+    "HOM-137872169",  # Ventilador de Torre 39 Pulgadas
+    "ALK-5025232946846",  # Audífonos PANASONIC Inalámbricos Bluetooth In Ear TWS
+    "HOM-151353311",  # Taladro Percutor 1/2 Pulgada 720 Watts
+    "FAL-122840185",  # Licuadora y Procesador de Alimentos de 700 W Hamilton B
+    "ALK-050875003835",  # Freidora de Aire BLACK+DECKER 4.2 Litros AFBD42 Digital
+    "JUM-20133753",  # Audifonos Bluetooth Inalambricos con Pantalla
+    "FAL-157018320",  # Xiaomi Redmi Watch 6 Active Pantalla AMOLED de 1,85"
+    "FAL-157017522",  # Xiaomi Redmi Watch 6 Active Pantalla AMOLED de 1,85"
+    "HOM-155772774",  # Aspiradora Inalámbrica Barredora Electrolux Erg019 Azu
+    "JUM-20142258",  # Freidora De Aire 8 Litros Digital Para Cocina Saludable
+    "FAL-145256069",  # Licuadora y Procesador de Alimentos Sistema de Cocina H
+    "FAL-73290657",  # Audífonos Soundcore Bluetooth Space One Noise cancelli
+    "KTR-7705946474665",  # Freidora de Aire KALLEY 7.5 Litros K-MAF75 Negro
+    "SON-2368",  # Mouse inalámbrico para juegos INZONE Mouse-A
+    "HOM-118654954",  # Taladro Inalámbrico Rotación 3/8 Pulgada 20V I-L Blac
+    "FAL-73376613",  # Audífonos Soundcore Bluetooth Aerofit 2 IA
+    "FAL-73637397",  # Freidora de Aire PT60 Dreame
+    "FAL-149115142",  # Aspiradora Robot Xiaomi Vacuum S40C LiDAR  Barre y Trap
+    "FAL-122829197",  # Licuadora Profesional Ninja Plus Con Auto Iq 1400 W Ult
+    "KTR-7909569512166",  # Horno Microondas ELECTROLUX 0.7 Pies EMDZ20S8GAB Negro
+    "KIT-430",  # Batidora Classic 4.2 L Onyx Black
+}
+
 
 def _fee_for(
     category_id: str,
