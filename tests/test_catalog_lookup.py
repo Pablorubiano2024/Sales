@@ -268,3 +268,75 @@ def test_get_buy_box_snapshot_retries_once_on_rate_limit(monkeypatch) -> None:
     assert calls["count"] == 2
     assert snapshot is not None
     assert snapshot.seller_count == 1
+
+
+def _brand_search(*brands: str):
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/products/search"
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {"id": f"MCO{i}", "attributes": [{"id": "BRAND", "value_name": b}]}
+                    for i, b in enumerate(brands)
+                ]
+            },
+        )
+
+    return handler
+
+
+def test_find_title_brand_matches_catalog_spelling_of_the_title_brand() -> None:
+    # The real 2026-11-25 case: Homecenter gives no brand, title says
+    # "Black And Decker", catalog spells it "Black+Decker".
+    client = _client(_brand_search("Black+Decker", "Dekopro", "Taladro 12V"))
+    brand = catalog_lookup.find_title_brand(
+        "Taladro Inalámbrico Rotación 3/8 Pulgada 20V I-L Black And Decker",
+        client=client,
+        access_token="t",
+    )
+    assert brand == "Black+Decker"
+
+
+def test_find_title_brand_none_when_the_title_names_no_brand() -> None:
+    client = _client(_brand_search("Kanji", "Bella", "PowerXL", "Digital"))
+    assert (
+        catalog_lookup.find_title_brand(
+            "Freidora De Aire 8 Litros Digital Para Cocina Saludable",
+            client=client,
+            access_token="t",
+        )
+        is None
+    )
+
+
+def test_find_title_brand_needs_whole_words() -> None:
+    # "Bella" must not match inside "Bellavista".
+    client = _client(_brand_search("Bella"))
+    assert (
+        catalog_lookup.find_title_brand("Lámpara Bellavista", client=client, access_token="t")
+        is None
+    )
+
+
+def test_find_title_brand_none_when_two_brands_match() -> None:
+    client = _client(_brand_search("Samsung", "Xiaomi"))
+    assert (
+        catalog_lookup.find_title_brand(
+            "Cargador compatible Samsung y Xiaomi", client=client, access_token="t"
+        )
+        is None
+    )
+
+
+def test_find_title_brand_prefers_the_longer_brand() -> None:
+    client = _client(_brand_search("Decker", "Black+Decker"))
+    assert (
+        catalog_lookup.find_title_brand("Sierra Black & Decker", client=client, access_token="t")
+        == "Black+Decker"
+    )
+
+
+def test_find_title_brand_none_on_http_error() -> None:
+    client = _client(lambda request: httpx.Response(500))
+    assert catalog_lookup.find_title_brand("Taladro Bosch", client=client, access_token="t") is None

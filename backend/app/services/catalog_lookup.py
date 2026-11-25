@@ -245,3 +245,56 @@ def get_buy_box_snapshot(
         buy_box_seller_id=str(winner["seller_id"]),
         stock_available=True,
     )
+
+
+# Words a catalog seller may have typed as BRAND that are also ordinary
+# title words ("Freidora Digital", "Smart TV") — never read as a brand.
+_NOT_A_BRAND = {"generica", "generico", "digital", "smart", "pro", "original", "premium", "mini"}
+
+
+def _brand_key(text: str) -> str:
+    """'Black+Decker' / 'Black & Decker' / 'Black And Decker' -> 'black decker'."""
+    stripped = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
+    words = [w for w in re.findall(r"[a-z0-9]+", stripped.lower()) if w not in {"and", "y"}]
+    return " ".join(words)
+
+
+def find_title_brand(name: str, *, client: httpx.Client, access_token: str) -> str | None:
+    """The brand a product's own title names, spelled the way
+    MercadoLibre's catalog spells it, for a source that gives no brand
+    field (Homecenter). 2026-11-25: a drill titled "...Black And Decker"
+    went out with BRAND "Genérica" and MercadoLibre paused it ("las marcas
+    declaradas no coinciden con las marcas detectadas"; these infractions
+    add up to an account suspension).
+
+    Candidates are the BRAND values of /products/search results for the
+    title; one counts only when all its words appear, in order, as whole
+    words of the title. None when nothing matches, when two different
+    brands do, or when the call fails — the caller then keeps "Genérica",
+    which is right for a title that names no brand."""
+    try:
+        response = _get_with_retry(
+            client,
+            "/products/search",
+            params={"site_id": "MCO", "q": name},
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        response.raise_for_status()
+        results = response.json().get("results", [])
+    except httpx.HTTPError as exc:
+        logger.warning("products/search(%r) for brand failed: %s", name, exc)
+        return None
+
+    title = f" {_brand_key(name)} "
+    found: dict[str, str] = {}
+    for result in results:
+        for attribute in result.get("attributes") or []:
+            if attribute.get("id") != "BRAND" or not attribute.get("value_name"):
+                continue
+            brand = str(attribute["value_name"])
+            key = _brand_key(brand)
+            if key and key not in _NOT_A_BRAND and f" {key} " in title:
+                found.setdefault(key, brand)
+    # "Black Decker" also contains "Decker": keep only the most specific.
+    keys = {k for k in found if not any(k != o and f" {k} " in f" {o} " for o in found)}
+    return found[keys.pop()] if len(keys) == 1 else None

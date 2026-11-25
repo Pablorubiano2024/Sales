@@ -210,7 +210,14 @@ def generate_draft(
     )
     covered_attribute_ids = frozenset(a["id"] for a in extra_attributes)
 
-    brand = live.brand or product.brand or "Genérica"
+    brand = live.brand or product.brand
+    if not brand and access_token is not None:
+        # A title that names a brand must not go out as "Genérica" —
+        # MercadoLibre pauses it (see catalog_lookup.find_title_brand).
+        brand = catalog_lookup.find_title_brand(
+            real_name, client=ml_public_client, access_token=access_token
+        )
+    brand = brand or "Genérica"
     model = extract_model(live.specifications) or "Genérico"
 
     # brand/model passed through so conditional attributes (GTIN,
