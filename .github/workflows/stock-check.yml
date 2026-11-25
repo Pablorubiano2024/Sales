@@ -13,10 +13,16 @@ name: Stock check
 #      listings that are back in stock and clear the ROI gate. Active
 #      listings are NOT repriced here; that stays daily.
 #
-# Every 15 minutes is the request, not a guarantee: GitHub delays and
-# sometimes skips scheduled runs (confirmed hours late on this repo), so in
-# practice this is "several times a day". Free: the repo is public. Note
-# GitHub disables schedules after 60 days without repo activity.
+# Cadence: each run dispatches the next one ~15 minutes after it started
+# (last step). The cron alone was not enough: GitHub throttles scheduled
+# runs, and from 2026-11-11 to 11-25 this ran every 4-8 hours instead of
+# every 15 minutes, which also left the 6-hour MercadoLibre token expired
+# between runs. The cron stays as a backup that restarts the chain if it
+# breaks. Extra chains don't pile up: the concurrency group lets only one
+# run go plus one wait, and the waiting slot is replaced, not stacked.
+# To stop the chain: set the repo variable STOCK_CHECK_CHAIN=off (or
+# cancel the running run). Free: the repo is public. Note GitHub disables
+# schedules after 60 days without repo activity.
 
 on:
   schedule:
@@ -33,8 +39,15 @@ concurrency:
 jobs:
   stock-check:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Up to ~5 min of checks + the wait before dispatching the next run.
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: write  # dispatch the next run
     steps:
+      - name: Note start time
+        run: echo "RUN_STARTED=$(date +%s)" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
@@ -72,3 +85,15 @@ jobs:
           ML_CLIENT_SECRET: ${{ secrets.ML_CLIENT_SECRET }}
           ML_REDIRECT_URI: ${{ secrets.ML_REDIRECT_URI }}
         run: poetry run python scripts/optimize_listings.py --confirm --only-paused
+
+      # Runs even if a check failed (so one bad fetch doesn't break the
+      # chain), but not when the run was cancelled — cancelling stops it.
+      - name: Schedule the next check
+        if: ${{ !cancelled() && vars.STOCK_CHECK_CHAIN != 'off' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          elapsed=$(( $(date +%s) - RUN_STARTED ))
+          wait=$(( 900 - elapsed ))
+          if [ "$wait" -gt 0 ]; then sleep "$wait"; fi
+          gh workflow run stock-check.yml --repo "$GITHUB_REPOSITORY" --ref main
