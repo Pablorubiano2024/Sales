@@ -23,11 +23,14 @@ class _FakeSlack:
         self.acked: set[str] = set()
         self.reactions: dict[str, str] = {}
         self.replied: set[str] = set()
+        self.channel_messages: list[dict] = []
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         if request.url.path == "/api/chat.postMessage":
             self.posts.append(json.loads(request.content)["text"])
             return httpx.Response(200, json={"ok": True, "ts": f"ts{len(self.posts)}"})
+        if request.url.path == "/api/conversations.history":
+            return httpx.Response(200, json={"ok": True, "messages": self.channel_messages})
         ts = dict(httpx.QueryParams(request.content.decode()))["timestamp"]
         message: dict = {"reactions": []}
         if ts in self.acked:
@@ -138,3 +141,14 @@ def test_a_thread_reply_acknowledges(db_session: Session) -> None:
     run_sale_alerts(db_session, slack, "C1")
     fake.replied.add("ts1")
     assert run_sale_alerts(db_session, slack, "C1", now=datetime(2030, 1, 1)).acknowledged == 1
+
+
+def test_a_person_messaging_the_channel_acknowledges(db_session: Session) -> None:
+    _order(db_session)
+    fake = _FakeSlack()
+    slack = SlackClient("xoxb-test", transport=httpx.MockTransport(fake.handler))
+    run_sale_alerts(db_session, slack, "C1")
+    fake.channel_messages = [{"ts": "ts9", "bot_id": "B1", "user": "U0"}]
+    assert run_sale_alerts(db_session, slack, "C1", now=datetime(2030, 1, 1)).acknowledged == 0
+    fake.channel_messages.append({"ts": "ts10", "user": "U1", "text": ":white_check_mark:"})
+    assert run_sale_alerts(db_session, slack, "C1", now=datetime(2031, 1, 1)).acknowledged == 1

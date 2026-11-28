@@ -5,7 +5,10 @@ stock-check workflow) posts every open sale to Slack and keeps re-posting
 it every RESEND_EVERY until someone reacts (any emoji) or replies in the
 thread of any of its messages — the "Enterado" button. Any reaction, not
 only ✅: on 2026-11-28 the owner's ✅ never registered (reactions.get
-kept returning none, no error) and the alert re-posted 56 times.
+kept returning none, no error) and the alert re-posted 56 times — the
+✅ was most likely sent as a channel message, so a person's message in
+the channel after the alert also counts (conversations.history, scope
+channels:history; without it Slack answers missing_scope, logged).
 A real Slack button needs a public endpoint that
 answers within 3s, and Render's free instance sleeps, so the reaction is
 read back with reactions.get instead (bot scopes chat:write +
@@ -88,6 +91,17 @@ class SlackClient:
                 replies,
             )
         return bool(reactions or replies)
+
+    def has_human_message_after(self, channel: str, ts: str) -> bool:
+        """A message from a person (not a bot) posted in the channel after ts."""
+        data = self._call(
+            "conversations.history", data={"channel": channel, "oldest": ts, "limit": 50}
+        )
+        for message in (data or {}).get("messages") or []:
+            if message.get("user") and not message.get("bot_id") and not message.get("subtype"):
+                logger.info("Slack %s acknowledged by a channel message at %s", ts, message["ts"])
+                return True
+        return False
 
 
 @dataclass
@@ -179,7 +193,9 @@ def run_sale_alerts(
         if alert.acknowledged_at is not None:
             continue
         sent_ts: list[str] = jsonlib.loads(alert.message_ts or "[]")
-        if any(slack.is_acknowledged(channel, ts) for ts in sent_ts):
+        if any(slack.is_acknowledged(channel, ts) for ts in sent_ts) or (
+            sent_ts and slack.has_human_message_after(channel, sent_ts[0])
+        ):
             alert.acknowledged_at = now
             db.commit()
             result.acknowledged += 1
