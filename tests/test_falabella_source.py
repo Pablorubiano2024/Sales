@@ -62,8 +62,8 @@ def test_search_products_parses_real_response_shape() -> None:
     # a guessed wholesale-arbitrage markup.
     assert product.reference_price == Decimal("4099900")
     assert product.image_urls == (
-        "https://media.falabella.com.co/falabellaCO/73568541_01/public",
-        "https://media.falabella.com.co/falabellaCO/73568541_02/public",
+        "https://media.falabella.com.co/falabellaCO/73568541_01/w=1200,h=1200,fit=pad",
+        "https://media.falabella.com.co/falabellaCO/73568541_02/w=1200,h=1200,fit=pad",
     )
     assert product.brand == "HISENSE"
 
@@ -221,8 +221,8 @@ def test_get_product_falls_back_to_variant_images_when_top_level_is_a_placeholde
 
     assert product is not None
     assert product.image_urls == (
-        "https://media.falabella.com/falabellaCO/137938700_01/public",
-        "https://media.falabella.com/falabellaCO/137938700_02/public",
+        "https://media.falabella.com/falabellaCO/137938700_01/w=1200,h=1200,fit=pad",
+        "https://media.falabella.com/falabellaCO/137938700_02/w=1200,h=1200,fit=pad",
     )
 
 
@@ -347,3 +347,13 @@ def test_get_product_ignores_the_cmr_price_without_the_card() -> None:
 
     assert product is not None
     assert product.price == Decimal("999900")
+
+
+def test_full_size_asks_falabella_for_a_1200px_image() -> None:
+    from backend.app.integrations.falabella_source import _full_size
+
+    assert (
+        _full_size("https://media.falabella.com/falabellaCO/158658504_01/public")
+        == "https://media.falabella.com/falabellaCO/158658504_01/w=1200,h=1200,fit=pad"
+    )
+    assert _full_size("https://example.com/a.jpg") == "https://example.com/a.jpg"

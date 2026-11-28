@@ -30,6 +30,7 @@ Checked before writing this (Imusa 2026-09-25, Jumbo added same day):
 
 from __future__ import annotations
 
+import re
 from dataclasses import replace
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -84,6 +85,19 @@ def _gtin(ean: Any) -> str | None:
     return code.zfill(12) if len(code) == 11 else code
 
 
+# VTEX serves an image at its uploaded size unless the URL asks for one:
+# ".../arquivos/ids/157150/x.jpg" is 400x350 on KitchenAid, below
+# MercadoLibre's 500 px minimum (a batidora sat paused in
+# picture_download_pending from 2026-11-24). ".../ids/157150-1200-1200/x.jpg"
+# is the same image fitted into 1200x1200.
+_VTEX_IMAGE_ID = re.compile(r"(/arquivos/ids/\d+)(?:-\d+-\d+)?/")
+VTEX_IMAGE_SIZE = 1200
+
+
+def _vtex_full_size(url: str) -> str:
+    return _VTEX_IMAGE_ID.sub(rf"\1-{VTEX_IMAGE_SIZE}-{VTEX_IMAGE_SIZE}/", url, count=1)
+
+
 class ImusaSourceAdapter(SourceAdapter):
     """Source adapter for imusa.com.co's real, robots.txt-permitted VTEX
     product search API. `base_url` defaults to Imusa itself; subclasses
@@ -132,7 +146,11 @@ class ImusaSourceAdapter(SourceAdapter):
         stock_available = (
             bool(offer.get("IsAvailable")) and (offer.get("AvailableQuantity") or 0) > 0
         )
-        image_urls = tuple(img["imageUrl"] for img in item.get("images", []) if img.get("imageUrl"))
+        image_urls = tuple(
+            _vtex_full_size(img["imageUrl"])
+            for img in item.get("images", [])
+            if img.get("imageUrl")
+        )
 
         specifications = []
         for name in p.get("allSpecifications") or []:

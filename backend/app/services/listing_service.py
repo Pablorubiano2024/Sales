@@ -97,6 +97,7 @@ def refresh_listing_status(
 
 
 WAITING_FOR_PATCH = "waiting_for_patch"
+PICTURE_DOWNLOAD_PENDING = "picture_download_pending"
 
 
 def repair_stuck_pictures(
@@ -111,13 +112,19 @@ def repair_stuck_pictures(
     2 days until its photos were sent again (2026-10-23) — so
     waiting_for_patch alone is the signal, except on a `catalog_forewarning`
     item: there it's waiting for a catalog decision, not photos (2026-11-01).
+    A `paused` item with picture_download_pending alone is the same wait:
+    three listings with too-small photos sat like that from 2026-11-24.
     Re-sends the source's current photos; True if it did."""
     if record.external_id is None or not image_urls:
         return False
     listing = adapter.get_listing(record.external_id)
     sub_status = set((listing.raw or {}).get("sub_status") or []) if listing else set()
     tags = (listing.raw or {}).get("tags") or [] if listing else []
-    if WAITING_FOR_PATCH not in sub_status or "catalog_forewarning" in tags:
+    status = (listing.raw or {}).get("status") if listing else None
+    # picture_download_pending on an item still under review is MercadoLibre
+    # processing a new item's photos; on a paused one it has given up on them.
+    gave_up = PICTURE_DOWNLOAD_PENDING in sub_status and status == "paused"
+    if (WAITING_FOR_PATCH not in sub_status and not gave_up) or "catalog_forewarning" in tags:
         return False
     try:
         adapter.update_listing(record.external_id, pictures=[{"source": u} for u in image_urls])

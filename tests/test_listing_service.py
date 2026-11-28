@@ -203,16 +203,17 @@ def test_update_listing_price_calls_adapter_and_persists(
 
 
 @pytest.mark.parametrize(
-    ("sub_status", "resent"),
+    ("sub_status", "status", "resent"),
     [
-        (["waiting_for_patch", "picture_download_pending"], True),
-        (["waiting_for_patch"], True),  # left after a first re-send
-        (["picture_download_pending"], False),  # still processing a new item
-        ([], False),
+        (["waiting_for_patch", "picture_download_pending"], "under_review", True),
+        (["waiting_for_patch"], "under_review", True),  # left after a first re-send
+        (["picture_download_pending"], "under_review", False),  # still processing a new item
+        (["picture_download_pending"], "paused", True),  # gave up: photos too small
+        ([], "under_review", False),
     ],
 )
 def test_repair_stuck_pictures_only_resends_when_ml_waits_for_them(
-    sub_status: list[str], resent: bool
+    sub_status: list[str], status: str, resent: bool
 ) -> None:
     adapter = _StubAdapter()
     adapter.get_listing_result = MarketplaceListingInfo(
@@ -220,8 +221,8 @@ def test_repair_stuck_pictures_only_resends_when_ml_waits_for_them(
         title="Test Widget",
         price=Decimal("50000"),
         currency="COP",
-        status="under_review",
-        raw={"sub_status": sub_status},
+        status=status,
+        raw={"sub_status": sub_status, "status": status},
     )
     record = MarketplaceProduct(external_id="MCO999", selling_price=Decimal("0"))
 

@@ -143,11 +143,24 @@ def _live_price(prices: list[dict[str, Any]]) -> Decimal | None:
 _PLACEHOLDER_MEDIA_ID = "default_no_image"
 
 
+# Falabella's media URLs end in a named variant, ".../158658504_01/public".
+# Since ~2026-11 "public" is a 100x100 thumbnail: 3 listings published on
+# 2026-11-24 got 36-475 px photos and MercadoLibre left them paused in
+# picture_download_pending (it needs 500 px). The same image at a stated
+# size: ".../w=1200,h=1200,fit=pad" (1200 is MercadoLibre's recommended size).
+_PUBLIC_VARIANT = "/public"
+_SIZED_VARIANT = "/w=1200,h=1200,fit=pad"
+
+
+def _full_size(url: str) -> str:
+    return url[: -len(_PUBLIC_VARIANT)] + _SIZED_VARIANT if url.endswith(_PUBLIC_VARIANT) else url
+
+
 def _image_urls_from_medias(medias: list[dict[str, Any]]) -> tuple[str, ...]:
     """Extract real photo URLs from a detail-page `medias` list, dropping
     the "no image" placeholder and anything that isn't an image."""
     return tuple(
-        m["url"]
+        _full_size(m["url"])
         for m in medias
         if m.get("mediaType") == "image" and m.get("id") != _PLACEHOLDER_MEDIA_ID and m.get("url")
     )
@@ -228,7 +241,7 @@ class FalabellaSourceAdapter(SourceAdapter):
             url=item.get("url"),
             raw=item,
             reference_price=_reference_price(prices),
-            image_urls=tuple(u for u in (item.get("mediaUrls") or []) if u),
+            image_urls=tuple(_full_size(u) for u in (item.get("mediaUrls") or []) if u),
             brand=item.get("brand") or None,
         )
 

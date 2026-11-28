@@ -251,3 +251,14 @@ def test_brand_stores_point_at_their_own_site() -> None:
         # The store reports its company name; MercadoLibre knows the brand.
         assert haceb.search_products("x")[0].brand == "Haceb"
     assert seen == ["store.sony.com.co", "www.haceb.com"]
+
+
+def test_vtex_full_size_asks_for_a_1200px_image() -> None:
+    from backend.app.integrations.imusa_source import _vtex_full_size
+
+    base = "https://kaidcol.vteximg.com.br/arquivos/ids/"
+    assert (
+        _vtex_full_size(base + "157150/K45SSOB-Modulo-2.jpg?v=1")
+        == base + "157150-1200-1200/K45SSOB-Modulo-2.jpg?v=1"
+    )
+    assert _vtex_full_size(base + "157150-500-500/x.jpg") == base + "157150-1200-1200/x.jpg"
