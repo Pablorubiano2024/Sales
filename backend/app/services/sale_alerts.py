@@ -2,8 +2,11 @@
 
 The first sale (2026-10-22) was only noticed by chance. Each run (the
 stock-check workflow) posts every open sale to Slack and keeps re-posting
-it every RESEND_EVERY until someone reacts ✅ to any of its messages —
-the "Enterado" button. A real Slack button needs a public endpoint that
+it every RESEND_EVERY until someone reacts (any emoji) or replies in the
+thread of any of its messages — the "Enterado" button. Any reaction, not
+only ✅: on 2026-11-28 the owner's ✅ never registered (reactions.get
+kept returning none, no error) and the alert re-posted 56 times.
+A real Slack button needs a public endpoint that
 answers within 3s, and Render's free instance sleeps, so the reaction is
 read back with reactions.get instead (bot scopes chat:write +
 reactions:read).
@@ -32,8 +35,10 @@ from backend.app.models.source import Source, SourceProduct
 logger = get_logger(__name__)
 
 SLACK_API = "https://slack.com/api"
-RESEND_EVERY = timedelta(minutes=15)
-ACK_REACTIONS = {"white_check_mark", "heavy_check_mark", "ballot_box_with_check"}
+# Was 15 minutes, matching the old stock-check cadence of a few runs a
+# day. Since stock-check runs every 15 minutes for real (2026-11-25) that
+# meant 4 messages an hour; hourly is enough to not miss a sale.
+RESEND_EVERY = timedelta(hours=1)
 ORDER_URL = "https://www.mercadolibre.com.co/ventas/{order_id}/detalle"
 
 
@@ -68,9 +73,21 @@ class SlackClient:
         return data.get("ts") if data else None
 
     def is_acknowledged(self, channel: str, ts: str) -> bool:
+        """Any reaction on the message, or any reply in its thread
+        (reactions.get returns the message with its reply_count, so no
+        extra scope is needed)."""
         data = self._call("reactions.get", data={"channel": channel, "timestamp": ts})
-        reactions = ((data or {}).get("message") or {}).get("reactions") or []
-        return any(r.get("name") in ACK_REACTIONS for r in reactions)
+        message = (data or {}).get("message") or {}
+        reactions = message.get("reactions") or []
+        replies = int(message.get("reply_count") or 0)
+        if reactions or replies:
+            logger.info(
+                "Slack %s acknowledged: reactions=%s replies=%s",
+                ts,
+                [r.get("name") for r in reactions],
+                replies,
+            )
+        return bool(reactions or replies)
 
 
 @dataclass
@@ -127,7 +144,10 @@ def alert_text(db: Session, order: Order, deadline: str | None, reminder: int) -
         lines.append("💳 Paga con tu tarjeta Falabella: el costo asume el precio CMR.")
     if order.marketplace_order_id:
         lines.append(f"Venta: {ORDER_URL.format(order_id=order.marketplace_order_id)}")
-    lines.append("Reacciona con ✅ a este mensaje para dejar de recibir recordatorios.")
+    lines.append(
+        "Reacciona con ✅ (o cualquier emoji) o responde en el hilo "
+        "para dejar de recibir recordatorios."
+    )
     return "\n".join(lines)
 
 

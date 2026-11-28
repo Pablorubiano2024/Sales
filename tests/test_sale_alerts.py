@@ -21,14 +21,22 @@ class _FakeSlack:
     def __init__(self) -> None:
         self.posts: list[str] = []
         self.acked: set[str] = set()
+        self.reactions: dict[str, str] = {}
+        self.replied: set[str] = set()
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         if request.url.path == "/api/chat.postMessage":
             self.posts.append(json.loads(request.content)["text"])
             return httpx.Response(200, json={"ok": True, "ts": f"ts{len(self.posts)}"})
         ts = dict(httpx.QueryParams(request.content.decode()))["timestamp"]
-        reactions = [{"name": "white_check_mark"}] if ts in self.acked else []
-        return httpx.Response(200, json={"ok": True, "message": {"reactions": reactions}})
+        message: dict = {"reactions": []}
+        if ts in self.acked:
+            message["reactions"] = [{"name": "white_check_mark"}]
+        if ts in self.reactions:
+            message["reactions"] = [{"name": self.reactions[ts]}]
+        if ts in self.replied:
+            message["reply_count"] = 1
+        return httpx.Response(200, json={"ok": True, "message": message})
 
 
 def _order(db: Session) -> Order:
@@ -60,13 +68,14 @@ def test_alert_repeats_until_acknowledged(db_session: Session) -> None:
     alert.last_sent_at = t0
     db_session.commit()
 
-    assert run_sale_alerts(db_session, slack, "C1", now=t0 + timedelta(minutes=5)).waiting == 1
-    assert run_sale_alerts(db_session, slack, "C1", now=t0 + timedelta(minutes=16)).sent == 1
+    # stock-check runs every 15 minutes; reminders go out hourly.
+    assert run_sale_alerts(db_session, slack, "C1", now=t0 + timedelta(minutes=16)).waiting == 1
+    assert run_sale_alerts(db_session, slack, "C1", now=t0 + timedelta(minutes=61)).sent == 1
     assert "Recordatorio 1" in fake.posts[1]
 
     fake.acked.add("ts1")  # ✅ on the first message
-    assert run_sale_alerts(db_session, slack, "C1", now=t0 + timedelta(hours=1)).acknowledged == 1
-    assert run_sale_alerts(db_session, slack, "C1", now=t0 + timedelta(hours=2)).sent == 0
+    assert run_sale_alerts(db_session, slack, "C1", now=t0 + timedelta(hours=2)).acknowledged == 1
+    assert run_sale_alerts(db_session, slack, "C1", now=t0 + timedelta(hours=3)).sent == 0
     assert len(fake.posts) == 2
 
 
@@ -111,3 +120,21 @@ def test_no_alert_once_the_sale_has_shipped(db_session: Session) -> None:
     slack = SlackClient("xoxb-test", transport=httpx.MockTransport(fake.handler))
     assert run_sale_alerts(db_session, slack, "C1").sent == 0
     assert fake.posts == []
+
+
+def test_any_reaction_acknowledges(db_session: Session) -> None:
+    _order(db_session)
+    fake = _FakeSlack()
+    slack = SlackClient("xoxb-test", transport=httpx.MockTransport(fake.handler))
+    run_sale_alerts(db_session, slack, "C1")
+    fake.reactions["ts1"] = "+1"
+    assert run_sale_alerts(db_session, slack, "C1", now=datetime(2030, 1, 1)).acknowledged == 1
+
+
+def test_a_thread_reply_acknowledges(db_session: Session) -> None:
+    _order(db_session)
+    fake = _FakeSlack()
+    slack = SlackClient("xoxb-test", transport=httpx.MockTransport(fake.handler))
+    run_sale_alerts(db_session, slack, "C1")
+    fake.replied.add("ts1")
+    assert run_sale_alerts(db_session, slack, "C1", now=datetime(2030, 1, 1)).acknowledged == 1
