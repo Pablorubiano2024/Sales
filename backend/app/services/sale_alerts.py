@@ -159,7 +159,7 @@ def alert_text(db: Session, order: Order, deadline: str | None, reminder: int) -
     if order.marketplace_order_id:
         lines.append(f"Venta: {ORDER_URL.format(order_id=order.marketplace_order_id)}")
     lines.append(
-        "Reacciona con ✅ (o cualquier emoji) o responde en el hilo "
+        "Reacciona con ✅, responde en el hilo o escribe en el canal "
         "para dejar de recibir recordatorios."
     )
     return "\n".join(lines)
